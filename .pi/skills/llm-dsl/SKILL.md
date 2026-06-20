@@ -198,7 +198,13 @@ To create a new formula, add a `.formula.json` file to `.beads/formulas/`:
 }
 ```
 
-Then cook it:
+Then cook it (ephemeral, no --persist):
+
+```bash
+bd cook .beads/formulas/my-pipeline.formula.json
+```
+
+Or persist it for reuse across multiple pours:
 
 ```bash
 bd cook .beads/formulas/my-pipeline.formula.json --persist
