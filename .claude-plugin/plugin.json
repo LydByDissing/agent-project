@@ -1,0 +1,8 @@
+{
+  "name": "llm-dsl",
+  "description": "Multi-agent workflow orchestration using LLM-DSL and bd (beads) issue tracker. Spawns Claude sub-agents (haiku/sonnet) via the Agent tool for code, review, and test work while a conductor agent (sonnet/opus) orchestrates and synthesizes.",
+  "author": {
+    "name": "Tue Dissing",
+    "email": "tue@somersault.dk"
+  }
+}
