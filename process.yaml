@@ -1,0 +1,162 @@
+# LLM-DSL Process Definition — Add Input Validation pipeline
+# Validation testcase from docs/validation-testcase.md
+
+process: add-input-validation
+version: "1.0"
+
+schemas:
+  code-task:
+    extends: core
+    description: "Coder task schema"
+    fields:
+      spec:
+        type: structured
+        children:
+          field:
+            type: repeated
+            attrs: {name: str, required: bool, type: str, rule: str}
+      output-artifact:
+        type: repeated
+        attrs: {path: path}
+
+  review-task:
+    extends: core
+    description: "Reviewer task schema"
+    fields:
+      focus:
+        type: structured
+        attrs: {security: bool, style: bool, correctness: bool}
+      context-ref:
+        type: reference
+
+  review-result:
+    extends: core
+    description: "Reviewer result schema"
+    fields:
+      verdict:
+        type: enum
+        values: [approve, request-changes, block]
+      finding:
+        type: repeated
+        attrs: {severity: enum, path: path}
+        severity: {values: [critical, major, minor, info]}
+      security-check:
+        type: opaque
+      style:
+        type: enum
+        values: [pass, fail, warn]
+
+  test-task:
+    extends: core
+    description: "Tester task schema"
+    fields:
+      test-cases:
+        type: list-of-text
+      output-artifact:
+        type: repeated
+        attrs: {path: path}
+
+  test-result:
+    extends: core
+    description: "Tester result schema"
+    fields:
+      test-suite:
+        type: structured
+        attrs: {total: int, pass: int, fail: int}
+        children:
+          test:
+            type: repeated
+            attrs: {name: str, status: enum, reason: str}
+            status: {values: [pass, fail, skip, error]}
+
+agents:
+  main:
+    role: orchestrator
+    label: "Main Orchestrator"
+    description: "Orchestrates code changes and aggregates results."
+    system-prompt: prompts/main.md
+    schema:
+      input: [code-task, review-task, test-task]
+      output: [code-result, review-result, test-result]
+    validation: permissive
+    max-retries: 3
+    context-budget: 100000
+
+  coder:
+    role: worker
+    label: "Coder"
+    description: "Implements code changes from specifications."
+    system-prompt: prompts/coder.md
+    schema:
+      input: code-task
+      output: code-result
+    validation: permissive
+    max-retries: 3
+    context-budget: 100000
+
+  reviewer:
+    role: worker
+    label: "Code Reviewer"
+    description: "Reviews code for correctness, security, and style."
+    system-prompt: prompts/reviewer.md
+    schema:
+      input: review-task
+      output: review-result
+    validation: permissive
+    max-retries: 2
+    context-budget: 100000
+
+  tester:
+    role: worker
+    label: "Tester"
+    description: "Writes and runs tests for code changes."
+    system-prompt: prompts/tester.md
+    schema:
+      input: test-task
+      output: test-result
+    validation: permissive
+    max-retries: 2
+    context-budget: 100000
+
+topology:
+  routes:
+    - from: main
+      to: [coder, reviewer, tester]
+      messages: [task, cancel]
+    - from: [coder, reviewer, tester]
+      to: main
+      messages: [result, ask, error]
+  constraints:
+    - "main is the only orchestrator"
+    - "workers cannot route to each other"
+
+composition:
+  pattern: pipeline
+  steps:
+    - id: implement
+      agent: coder
+      task: code-task
+      on-finish: validate
+      on-fail: abort
+
+    - id: validate
+      pattern: parallel
+      steps:
+        - id: review
+          agent: reviewer
+          task: review-task
+          context-from: implement
+          on-finish: aggregate
+          on-fail: aggregate
+        - id: test
+          agent: tester
+          task: test-task
+          context-from: implement
+          on-finish: aggregate
+          on-fail: aggregate
+
+    - id: aggregate
+      pattern: aggregate
+      sources: [validate.review, validate.test]
+      on-finish: end
+      on-fail: abort
