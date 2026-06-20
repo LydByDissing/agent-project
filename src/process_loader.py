@@ -76,7 +76,59 @@ class ProcessDefinition:
     agents: dict[str, AgentDef] = field(default_factory=dict)
     routes: list[Route] = field(default_factory=list)
     composition: CompositionStep | None = None
+    dag: DagComposition | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+# ── DAG Composition (new) ──
+
+@dataclass
+class DagTask:
+    task_id: str
+    agent_type: str = ""
+    schema: str = ""
+    depends_on: list[str] = field(default_factory=list)
+    consumes: list[str] = field(default_factory=list)
+    produces: list[str] = field(default_factory=list)
+    fan_in: str = "all"
+    when: str = ""
+    retries: int = 0
+    body: str = ""
+    acceptance: list[str] = field(default_factory=list)
+
+@dataclass
+class DagComposition:
+    tasks: list[DagTask] = field(default_factory=list)
+    defaults: dict[str, str] = field(default_factory=dict)
+
+    def ready_tasks(self, completed: set[str]) -> list[DagTask]:
+        """Return tasks whose dependencies are all met."""
+        return [
+            t for t in self.tasks
+            if t.task_id not in completed
+            and all(d in completed for d in t.depends_on)
+        ]
+
+    def topo_sort(self) -> list[DagTask]:
+        """Topological sort of tasks by dependency order."""
+        visited: set[str] = set()
+        result: list[DagTask] = []
+        task_map = {t.task_id: t for t in self.tasks}
+
+        def visit(tid: str):
+            if tid in visited:
+                return
+            visited.add(tid)
+            task = task_map.get(tid)
+            if task:
+                for dep in task.depends_on:
+                    visit(dep)
+                result.append(task)
+
+        for t in self.tasks:
+            visit(t.task_id)
+
+        return result
 
 
 class ProcessLoadError(Exception):
@@ -123,11 +175,14 @@ def load_process(path: str | Path) -> ProcessDefinition:
     proc.routes = _load_routes(topology_block)
     _validate_routes(proc)
 
-    # Load composition
+    # Load composition (old nested format)
     comp_block = raw.get("composition", {})
     if comp_block:
-        proc.composition = _load_composition(comp_block)
-        _validate_composition(proc)
+        if comp_block.get("type") == "dag":
+            proc.dag = _load_dag_composition(comp_block)
+        else:
+            proc.composition = _load_composition(comp_block)
+            _validate_composition(proc)
 
     return proc
 

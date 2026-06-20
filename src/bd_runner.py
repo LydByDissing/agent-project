@@ -303,3 +303,148 @@ class BdPipelineRunner:
         parts.append("Mention any issues or action items.")
 
         return "\n".join(parts)
+
+    # ── Formula & Molecule Management ──
+
+    def cook_formula(self, formula_path: str, persist: bool = True) -> str:
+        """Cook a formula file into a proto. Returns proto name."""
+        args = ["cook", formula_path]
+        if persist:
+            args.append("--persist")
+
+        if self.dry_run:
+            print(f"  [DRY RUN] bd cook {formula_path}")
+            return formula_path.replace(".formula.json", "")
+
+        result = bd_run(*args)
+        # Try JSON output first
+        try:
+            data = json.loads(result.stdout)
+            name = data.get("proto_id", "")
+            if name:
+                self.log(f"Cooked proto: {name}")
+                return name
+        except json.JSONDecodeError:
+            pass
+        # Fallback: parse text output
+        for line in result.stdout.split("\n"):
+            if "Cooked proto:" in line:
+                name = line.split("Cooked proto:")[1].strip()
+                self.log(f"Cooked proto: {name}")
+                return name
+        # Fallback: derive from filename
+        import os
+        return os.path.basename(formula_path).replace(".formula.json", "")
+
+    def pour_molecule(self, formula_name: str, variables: dict[str, str] = None) -> str:
+        """Pour a molecule from a cooked proto. Returns root issue ID."""
+        args = ["mol", "pour", formula_name]
+        if variables:
+            for key, value in variables.items():
+                args.extend(["--var", f"{key}={value}"])
+
+        if self.dry_run:
+            print(f"  [DRY RUN] bd mol pour {formula_name} {variables}")
+            return f"dry-mol-{formula_name}"
+
+        result = bd_run(*args)
+        # Try JSON output first
+        try:
+            data = json.loads(result.stdout)
+            root_id = data.get("new_epic_id", "")
+            if root_id:
+                self.log(f"Poured mol: {root_id}")
+                return root_id
+        except json.JSONDecodeError:
+            pass
+        # Fallback: parse text output
+        for line in result.stdout.split("\n"):
+            if "Root issue:" in line:
+                root_id = line.split("Root issue:")[1].strip()
+                self.log(f"Poured mol: {root_id}")
+                return root_id
+        return ""
+
+    def get_molecule_root(self, mol_id: str) -> str:
+        """Get the root issue ID of a molecule."""
+        result = bd_run("mol", "show", mol_id, check=False)
+        if result.returncode == 0:
+            try:
+                data = json.loads(result.stdout)
+                return data.get("root", mol_id)
+            except json.JSONDecodeError:
+                pass
+        return mol_id
+
+    def get_molecule_progress(self, mol_id: str) -> dict:
+        """Get molecule progress. Returns dict with total/percent."""
+        result = bd_run("mol", "progress", mol_id, check=False)
+        if result.returncode != 0:
+            return {"total": 0, "completed": 0, "percent": 0}
+
+        # Parse JSON output
+        try:
+            data = json.loads(result.stdout)
+            return {
+                "completed": data.get("completed", 0),
+                "total": data.get("total", 0),
+                "percent": data.get("percent", 0),
+            }
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: parse text
+        import re
+        for line in result.stdout.split("\n"):
+            if "Progress:" in line:
+                m = re.search(r"(\d+)\s*/\s*(\d+)\s*\(([\d.]+)%\)", line)
+                if m:
+                    return {
+                        "completed": int(m.group(1)),
+                        "total": int(m.group(2)),
+                        "percent": float(m.group(3)),
+                    }
+        return {"total": 0, "completed": 0, "percent": 0}
+
+    def wait_for_molecule(self, mol_id: str, timeout: int = 3600,
+                          poll_interval: int = 30) -> bool:
+        """Wait for molecule to complete. Polls progress."""
+        if self.dry_run:
+            print(f"  [DRY RUN] Would wait for molecule {mol_id}")
+            return True
+
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            progress = self.get_molecule_progress(mol_id)
+            if progress["percent"] >= 100:
+                self.log(f"Molecule {mol_id} complete")
+                return True
+
+            self.log(f"Progress: {progress['completed']}/{progress['total']} ({progress['percent']}%)")
+            time.sleep(poll_interval)
+
+        self.log(f"Timeout waiting for molecule {mol_id}")
+        return False
+
+    def get_molecule_step_ids(self, mol_id: str) -> list[str]:
+        """Get step issue IDs for a molecule (excluding root)."""
+        result = bd_run("mol", "show", mol_id, "--json", check=False)
+        if result.returncode != 0:
+            return []
+        try:
+            data = json.loads(result.stdout)
+            issues = data.get("issues", [])
+            # Exclude the root molecule issue (type=molecule, has template label)
+            return [
+                i["id"] for i in issues
+                if i.get("issue_type") != "molecule"
+                and "template" not in i.get("labels", [])
+            ]
+        except json.JSONDecodeError:
+            return []
+
+    def collect_molecule_results(self, mol_id: str) -> list[dict]:
+        """Collect DSL results from all completed steps."""
+        step_ids = self.get_molecule_step_ids(mol_id)
+        return [self.get_result(sid) for sid in step_ids]

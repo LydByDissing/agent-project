@@ -1,0 +1,36 @@
+{
+  "formula": "code-review-pipeline",
+  "description": "Implement a code change with parallel review and testing",
+  "variables": {
+    "task_description": {"required": true},
+    "files_to_read": {"default": ""},
+    "output_files": {"default": ""},
+    "focus_areas": {"default": "correctness,security,style"}
+  },
+  "steps": [
+    {
+      "id": "implement",
+      "title": "Implement: {{task_description}}",
+      "agent": "coder",
+      "acceptance": [
+        "Code implements the specified requirements",
+        "All output files created/modified as specified"
+      ],
+      "body": "## Task\n\n[task id=t1 type=code]\n[goal]{{task_description}}[/goal]\n{{#each files_to_read}}[file read={{this}}]{{/each}}\n[spec]{{spec_fields}}[/spec]\n{{#each output_files}}[output-artifact path={{this}}]{{/each}}\n[/task]\n\n## Acceptance\n[accept]\n[check]Code implements the specified requirements[/check]\n[check]All output files created/modified[/check]\n[/accept]"
+    },
+    {
+      "id": "review",
+      "title": "Review: {{task_description}}",
+      "agent": "reviewer",
+      "depends_on": ["implement"],
+      "body": "## Task\n\n[task id=t2 type=review]\n[goal]Review: {{task_description}}[/goal]\n[context-ref id=t1.artifacts]\n[focus areas=\"{{focus_areas}}\"]\n[/task]\n\n## Acceptance\n[accept]\n[check]Code reviewed for {{focus_areas}}[/check]\n[check]Verdict provided[/check]\n[/accept]"
+    },
+    {
+      "id": "test",
+      "title": "Test: {{task_description}}",
+      "agent": "tester",
+      "depends_on": ["implement"],
+      "body": "## Task\n\n[task id=t3 type=test]\n[goal]Test: {{task_description}}[/goal]\n[context-ref id=t1.artifacts]\n[/task]\n\n## Acceptance\n[accept]\n[check]Tests written and executed[/check]\n[check]Results documented[/check]\n[/accept]"
+    }
+  ]
+}
