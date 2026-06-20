@@ -1,60 +1,66 @@
 ---
 name: llm-dsl
 description: >
-  Multi-agent workflow orchestration using LLM-DSL and bd (beads) issue tracker,
-  with real Claude sub-agents spawned via the Agent tool. Use when decomposing a
-  task into parallel worker roles (coder, reviewer, tester), where each worker is
-  a Claude sub-agent (haiku or sonnet) that reads its task from a bd issue, does
-  the work, writes a DSL result back, and closes the issue. The main agent
-  (sonnet/opus) orchestrates and synthesizes. Do NOT use for short messages,
-  quick status updates, or simple single-step questions.
+  Default orchestration skill for any non-trivial task in this project. The main
+  agent (sonnet/opus) acts as conductor only — it NEVER does the work itself.
+  All work is delegated to Claude sub-agents (haiku or sonnet) via the Agent
+  tool, tracked via bd issues, and communicated in compact LLM-DSL. Use for ANY
+  task that produces output: code changes, file analysis, research, review,
+  testing. Routes internally: single tasks go to one haiku worker; multi-step
+  tasks fan out to parallel workers. Skip ONLY for pure Q&A or one-line factual
+  answers where no file changes or structured output are needed.
 ---
 
 # LLM-DSL Skill
 
-## When to Use
+## Routing Decision (resolve before anything else)
 
-Use when:
-- A task benefits from parallel worker roles (code + review + test)
-- Messages contain structured data: file paths, line numbers, test results, findings
-- You want token-efficient inter-agent communication
+```
+Is this a factual question or one-liner with no file output?
+  YES → answer directly, skip this skill
+  NO  → continue ↓
 
-Skip when:
-- Content is < 50 tokens — DSL bracket overhead exceeds savings
-- It's a quick status update or one-liner response
+Is this a single focused task (one file, one topic, one goal)?
+  YES → spawn ONE haiku sub-agent with a [task] DSL, collect result
+  NO  → decompose into parallel workers (coder + reviewer + tester, etc.)
+```
+
+The main agent never writes code, reads files for analysis, or runs tests itself.
+That work always goes to a sub-agent.
 
 ---
 
 ## Architecture
 
 ```
-Main agent (sonnet/opus)
-  ├── Decompose task → DSL [task] blocks
+Main agent (sonnet/opus) — conductor only
+  ├── Route: single vs multi-step
   ├── Create bd issues (one per worker)
-  ├── Spawn sub-agents via Agent tool ──► haiku or sonnet
+  ├── Spawn sub-agents via Agent tool
+  │     haiku  → focused code/test work
+  │     sonnet → review, complex reasoning
   │     Each sub-agent:
-  │       1. bd show <id>          → read [task] DSL
+  │       1. bd show <id>         → read [task] DSL
   │       2. Do the work
-  │       3. bd update <id> body   → write [result] DSL
+  │       3. bd update <id> body  → write [result] DSL
   │       4. bd close <id>
-  ├── Collect results from bd issues
-  └── Synthesize → NL summary to user
+  ├── Collect results: bd show <id> | dsl_parse.py
+  └── Synthesize → short NL summary to user
 ```
 
 ### Model Selection
 
-| Worker role | Default | Use sonnet when |
-|-------------|---------|-----------------|
-| `coder`     | `haiku` | Multi-file refactor, complex logic |
-| `reviewer`  | `sonnet` | Always — reasoning is the job |
-| `tester`    | `haiku` | Simple test gen |
-| `tester`    | `sonnet` | Complex strategy, edge-case analysis |
-
-Main agent is already sonnet/opus — no change needed.
+| Role | Model | Rationale |
+|------|-------|-----------|
+| coder | `haiku` | Fast, cheap; sufficient for focused edits |
+| coder | `sonnet` | Multi-file refactor, architectural changes |
+| reviewer | `sonnet` | Reasoning-heavy; haiku misses subtle issues |
+| tester | `haiku` | Routine test generation |
+| tester | `sonnet` | Complex test strategy, edge-case analysis |
 
 ---
 
-## Step-by-Step Orchestration
+## Orchestration: Step by Step
 
 ### 1. Decompose into DSL task blocks
 
@@ -63,165 +69,146 @@ Main agent is already sonnet/opus — no change needed.
 [goal]Add email validation to signup[/goal]
 [file read=src/handlers/user.py]
 [spec][field name=email required=true rule=format:email][/spec]
-[output-artifact path=src/validation/email.py]
+[out src/validation/email.py]
 [/task]
 
 [task id=t2 type=review]
 [goal]Review email validation implementation[/goal]
-[context-ref id=t1.artifacts]
+[ref t1.artifacts]
 [/task]
 
 [task id=t3 type=test]
 [goal]Write tests for email validation[/goal]
-[context-ref id=t1.artifacts]
+[ref t1.artifacts]
 [/task]
 ```
 
 ### 2. Create bd issues
 
-Use `bd_create_task.py` instead of raw `bd create` — it handles quoting, labels, and deps cleanly.
-Always pass `--run-id` with a short unique ID (e.g. a timestamp or UUID prefix) so you can recover
-stalled issues later.
+Always pass `--run-id` for crash recovery.
 
 ```bash
-RUN_ID=$(date +%s)   # or: python3 -c "import uuid; print(uuid.uuid4().hex[:8])"
+RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 
 BD_CODER=$(python3 .claude/skills/llm-dsl/scripts/bd_create_task.py \
   --title "Implement: Add email validation" \
-  --agent coder \
-  --run-id "$RUN_ID" \
+  --agent coder --run-id "$RUN_ID" \
   --body '[task id=t1 type=code]
 [goal]Add email validation to signup[/goal]
-[output-artifact path=src/validation/email.py]
+[out src/validation/email.py]
 [/task]')
 
 BD_REVIEWER=$(python3 .claude/skills/llm-dsl/scripts/bd_create_task.py \
   --title "Review: email validation" \
-  --agent reviewer \
-  --run-id "$RUN_ID" \
+  --agent reviewer --run-id "$RUN_ID" \
   --depends-on "$BD_CODER" \
   --body '[task id=t2 type=review]
 [goal]Review email validation[/goal]
-[context-ref id=t1.artifacts]
+[ref t1.artifacts]
 [/task]')
 ```
 
-### 3. Spawn sub-agents via Agent tool
+### 3. Spawn sub-agents
 
-Spawn the coder first (foreground), then reviewer + tester in parallel:
+Foreground for blocking dependencies; background for parallel workers:
 
 ```python
-# Coder — foreground, must finish before review/test can start
-Agent(
-  description="Coder: Add email validation",
-  model="haiku",
-  prompt=sub_agent_prompt(bd_id=BD_CODER, role="coder"),
-  run_in_background=False
-)
+# Blocking: coder must finish before review/test
+Agent(model="haiku", description="Coder: email validation",
+      prompt=<sub_agent_prompt>, run_in_background=False)
 
-# Reviewer and tester — parallel, both read coder artifacts
-Agent(
-  description="Reviewer: email validation",
-  model="sonnet",
-  prompt=sub_agent_prompt(bd_id=BD_REVIEWER, role="reviewer"),
-  run_in_background=True
-)
-Agent(
-  description="Tester: email validation",
-  model="haiku",
-  prompt=sub_agent_prompt(bd_id=BD_TESTER, role="tester"),
-  run_in_background=True
-)
+# Parallel: reviewer and tester are independent of each other
+Agent(model="sonnet", description="Reviewer: email validation",
+      prompt=<sub_agent_prompt>, run_in_background=True)
+Agent(model="haiku", description="Tester: email validation",
+      prompt=<sub_agent_prompt>, run_in_background=True)
 ```
 
-### Sub-agent prompt template
-
-Give each sub-agent exactly this structure:
+**Sub-agent prompt template:**
 
 ```
 You are a <role> sub-agent. Your task is in bd issue <bd_id>.
 
-1. Read your task:
-   bd show <bd_id>
-   The body contains a [task] DSL block. Follow it exactly.
+1. Read: bd show <bd_id>
+   Follow the [task] DSL in the body exactly.
 
-2. Complete the work described in [goal].
-   Coder:    implement the code changes
-   Reviewer: read the artifacts in [context-ref], produce findings
-   Tester:   write and run tests, report pass/fail counts
+2. Do the work described in [goal]:
+   coder    → implement code changes
+   reviewer → read files in [ref], produce findings
+   tester   → write + run tests, report counts
 
-3. Write your result:
+3. Write result:
    bd update <bd_id> --body-file - << 'DSL'
-   [result id=<task_id> status=complete]
-   [artifact type=file path=<path> action=created|modified lines=<N>]
+   [result id=<task_id> s=ok]
+   [artifact path=<path> a=mod n=<lines>]
    [added fn=<name> in:<type> out:<type>]
    [/result]
    DSL
 
-4. Close the issue:
-   bd close <bd_id>
+4. Close: bd close <bd_id>
 
-Rules:
-- Do NOT create additional bd issues
-- If blocked: write status=blocked and explain in the result body
-- Do NOT communicate outside this issue
+Rules: no extra bd issues; if blocked write s=blocked + reason.
 ```
 
 ### 4. Collect and synthesize
-
-After all sub-agents complete, collect results:
 
 ```bash
 bd show <bd_id> | python3 .claude/skills/llm-dsl/scripts/dsl_parse.py --pretty
 ```
 
-Write a short NL summary to the user:
-- What changed (files, functions added/removed)
-- Review verdict and any findings
-- Test results (pass/fail counts)
-- Action items if any workers returned `status=blocked` or `status=failed`
+Write a short NL summary: what changed, verdict, test counts, any action items.
 
 ### Crash recovery
 
-If a sub-agent dies before closing its issue, find all stalled issues from this run:
-
 ```bash
-bd list --label "run=$RUN_ID" --status open
+bd list --label "run=$RUN_ID" --status open   # find stalled issues
+# Re-spawn the Agent with the same bd_id — sub-agent re-reads and resumes
 ```
-
-Any open issue with your run ID is a candidate for retry or manual inspection.
-Reopen the Agent call with the same bd_id — the sub-agent will re-read the issue and resume.
 
 ---
 
 ## DSL Format Reference
 
-### Task
+Tags keep readability where it matters for haiku workers; attrs are abbreviated
+since the main agent (sonnet) synthesizes results.
+
+### Task (input to worker)
 
 ```
 [task id=<id> type=code|review|test]
 [goal]<objective>[/goal]
-[file read=<path>]
-[spec]...[/spec]
-[context-ref id=<ref>]
-[output-artifact path=<path>]
+[file read=<path>]          # file to read (multiple allowed)
+[spec]...[/spec]            # structured constraints
+[ref <prior-task>.artifacts] # reference prior output
+[out <path>]                # expected output file
 [/task]
 ```
 
-### Result
+### Result (output from worker)
 
 ```
-[result id=<id> status=complete|partial|failed|blocked]
-[artifact type=file path=<path> action=created|modified|deleted lines=<N>]
+[result id=<id> s=ok|partial|fail|blocked]
+[artifact path=<path> a=new|mod|del n=<lines>]
 [added fn=<name> in:<type> out:<type>]
 [removed fn=<name>]
-[test-suite total=<N> pass=<N> fail=<N>]
-  [test name=<name> status=pass|fail reason=<text>]
-[/test-suite]
+[suite t=<total> p=<pass> f=<fail>]
+  [test name=<name> s=pass|fail reason=<text>]
+[/suite]
 [verdict approve|request-changes|block]
-[finding severity=critical|major|minor|info path=<file>:<line>]<text>[/finding]
+[note sev=crit|major|minor|info at=<file>:<line>]<text>[/note]
 [/result]
 ```
+
+**Attribute quick-ref:**
+
+| Abbrev | Meaning |
+|--------|---------|
+| `s=` | status (`ok` / `fail` / `blocked` / `partial`) |
+| `a=` | file action (`new` / `mod` / `del`) |
+| `n=` | line count |
+| `t=` `p=` `f=` | suite total / pass / fail |
+| `sev=` | severity (`crit` / `major` / `minor` / `info`) |
+| `at=` | file:line location |
 
 ---
 
@@ -229,28 +216,27 @@ Reopen the Agent call with the same bd_id — the sub-agent will re-read the iss
 
 ```bash
 bd show <id>                                # Read issue + body
-bd list --label agent=coder                 # By role
+bd list --label agent=coder                 # Filter by role
+bd list --label "run=$RUN_ID" --status open # Find stalled issues
 bd ready                                    # Unblocked issues
 bd blocked                                  # Blocked issues
-bd dep add <child> --depends-on <parent>    # Add dependency
-bd close <id>                               # Complete issue
-bd mol pour <formula> --var key=val         # Pour a molecule
-bd mol progress <mol_id>                    # Check progress
+bd dep add <child> --depends-on <parent>
+bd close <id>
 ```
 
 ## Helper Scripts
 
 ```bash
-# Create a bd issue with DSL body (preferred over raw bd create)
+# Create bd issue (preferred over raw bd create)
 python3 .claude/skills/llm-dsl/scripts/bd_create_task.py \
-  --title "Implement: X" --agent coder --run-id "$RUN_ID" --body '[task ...]'
+  --title "..." --agent coder --run-id "$RUN_ID" --body '[task ...]'
 
-# Parse DSL from bd show output → JSON
+# Parse DSL → JSON
 bd show <id> | python3 .claude/skills/llm-dsl/scripts/dsl_parse.py --pretty
 
 # Validate DSL
 python3 .claude/skills/llm-dsl/scripts/dsl_validate.py --file task.txt
 
-# Collect all results from a molecule
+# Collect molecule results
 python3 .claude/skills/llm-dsl/scripts/bd_collect.py --mol-id <mol_id> --pretty
 ```
