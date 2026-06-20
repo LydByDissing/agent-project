@@ -178,6 +178,10 @@ Agent(model="haiku", description="Tester: email validation",
 ```
 You are a <role> sub-agent. Your task is in bd issue <bd_id>.
 
+Project directory: <CLAUDE_PROJECT_DIR>
+All file reads and writes must be inside this directory.
+Run all shell commands from this directory.
+
 1. Read your task and acceptance criteria:
    bd show <bd_id>
 
