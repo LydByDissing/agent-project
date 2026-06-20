@@ -121,6 +121,13 @@ Only reached after explicit user approval.
 
 ### Create bd issues
 
+> **Note:** `$CLAUDE_PLUGIN_ROOT` is injected into agent prompts by Claude Code but is
+> **not** available as a shell environment variable when the conductor runs Bash commands.
+> Resolve the scripts path once at the start of step 5:
+> ```bash
+> SKILL_SCRIPTS="$HOME/.claude/plugins/llm-dsl/skills/llm-dsl/scripts"
+> ```
+
 ```bash
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 
