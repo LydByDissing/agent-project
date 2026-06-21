@@ -125,48 +125,49 @@ Only reached after explicit user approval.
 
 ### Setup
 
-At the start of Step 5, define:
-
 ```bash
-SKILL_SCRIPTS="/home/tue/code/ai/llm-dsl/skills/llm-dsl/scripts"
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 ```
-
-Note: `$CLAUDE_PLUGIN_ROOT` is not available in conductor bash. Use `SKILL_SCRIPTS` above.
 
 ### Create bd issues
 
 ```bash
-BD_CODER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
-  --title "Implement: Add email validation" \
-  --agent coder --run-id "$RUN_ID" \
+BD_CODER=$(bd create "Implement: Add email validation" --silent \
+  --labels "agent=coder,run=$RUN_ID" \
   --acceptance "validate_email() exists in src/validation/email.py" \
   --acceptance "rejects malformed addresses, accepts valid ones" \
-  --body '[task id=t1 type=code]
+  --body-file - << 'DSL'
+[task id=t1 type=code]
 [goal]Add email validation to signup[/goal]
 [out src/validation/email.py]
-[/task]')
+[/task]
+DSL
+)
 
-BD_REVIEWER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
-  --title "Review: email validation" \
-  --agent reviewer --run-id "$RUN_ID" \
-  --depends-on "$BD_CODER" \
+BD_REVIEWER=$(bd create "Review: email validation" --silent \
+  --labels "agent=reviewer,run=$RUN_ID" \
+  --deps "$BD_CODER" \
   --acceptance "no critical or major findings" \
-  --body '[task id=t2 type=review]
+  --body-file - << 'DSL'
+[task id=t2 type=review]
 [goal]Review email validation for correctness and security[/goal]
 [ref t1.artifacts]
-[/task]')
+[/task]
+DSL
+)
 
-BD_TESTER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
-  --title "Test: email validation" \
-  --agent tester --run-id "$RUN_ID" \
-  --depends-on "$BD_CODER" \
+BD_TESTER=$(bd create "Test: email validation" --silent \
+  --labels "agent=tester,run=$RUN_ID" \
+  --deps "$BD_CODER" \
   --acceptance "all tests pass" \
   --acceptance "edge cases covered: empty, malformed, unicode" \
-  --body '[task id=t3 type=test]
+  --body-file - << 'DSL'
+[task id=t3 type=test]
 [goal]Write and run tests for email validation[/goal]
 [ref t1.artifacts]
-[/task]')
+[/task]
+DSL
+)
 ```
 
 ### Spawn conductor-execute
@@ -398,21 +399,17 @@ bd dep add <child> --depends-on <parent>
 bd close <id>
 ```
 
-## Helper Scripts
+## Developer Scripts
+
+These scripts live in `skills/llm-dsl/scripts/` and are useful for local development and debugging. They are not called by the conductor during normal skill execution.
 
 ```bash
-# Create bd issue with acceptance criteria
-python3 $SKILL_SCRIPTS/bd_create_task.py \
-  --title "..." --agent coder --run-id "$RUN_ID" \
-  --acceptance "condition 1" --acceptance "condition 2" \
-  --body '[task ...]'
+# Parse DSL → JSON (debugging)
+bd show <id> | python3 skills/llm-dsl/scripts/dsl_parse.py --pretty
 
-# Parse DSL → JSON
-bd show <id> | python3 $SKILL_SCRIPTS/dsl_parse.py --pretty
+# Validate DSL syntax
+python3 skills/llm-dsl/scripts/dsl_validate.py --file task.txt
 
-# Validate DSL
-python3 $SKILL_SCRIPTS/dsl_validate.py --file task.txt
-
-# Collect molecule results
-python3 $SKILL_SCRIPTS/bd_collect.py --mol-id <mol_id> --pretty
+# Collect all results in a molecule
+python3 skills/llm-dsl/scripts/bd_collect.py --mol-id <mol_id> --pretty
 ```
