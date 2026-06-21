@@ -1,29 +1,40 @@
 ---
 name: llm-dsl
 description: >
-  Default orchestration skill for any non-trivial task in this project. The main
-  agent (sonnet/opus) acts as conductor only — it NEVER does the work itself.
-  All work is delegated to Claude sub-agents (haiku or sonnet) via the Agent
-  tool, tracked via bd issues, and communicated in compact LLM-DSL. Use for ANY
-  task that produces output: code changes, file analysis, research, review,
-  testing. Skip ONLY for pure Q&A or one-line factual answers where no file
-  changes or structured output are needed.
+  Default orchestration skill for any non-trivial task in this project. Main
+  agent plans, scopes, confirms with user, creates bd issues, then spawns a
+  haiku conductor-execute sub-agent to run the worker loop. Workers (haiku or
+  sonnet) do the actual code/review/test work, tracked via bd issues and
+  communicated in compact LLM-DSL. Use for ANY task that produces output: code
+  changes, file analysis, research, review, testing. Skip ONLY for pure Q&A or
+  one-line factual answers.
 ---
 
 # LLM-DSL Skill
 
+## Conductor Output Rules (Strict)
+
+- **Steps 1-3: NO user-facing text.** Do not narrate, summarize, or explain. Produce only the Step 4 block.
+- **Step 4:** confirm block in the exact fixed format below. Nothing before or after it.
+- **Step 5:** one status line only: "Spawning executor (run=<id>)..."
+- **Step 6:** structured synthesis report only. No padding, no preamble.
+
+---
+
 ## Mandatory Workflow (all six steps, in order)
 
 ```
-1. UNDERSTAND  — describe the problem in project context
-2. SCOPE       — state what is in and out of scope
-3. PLAN        — decompose into tasks, each with acceptance criteria; define DoD
-4. CONFIRM     — present 1-3 to user, ask "shall I proceed?", WAIT for go-ahead
-5. EXECUTE     — create bd issues, spawn sub-agents
-6. SYNTHESIZE  — verify against DoD, report to user
+1. UNDERSTAND      — (silent) describe the problem in project context
+2. SCOPE           — (silent) state what is in and out of scope
+3. PLAN            — (silent) decompose into tasks, each with acceptance criteria; define DoD
+4. CONFIRM         — (fixed format) present 1-3 to user, ask "shall I proceed?", WAIT for go-ahead
+5. EXECUTE         — create bd issues, spawn conductor-execute
+6. SYNTHESIZE      — verify against DoD, report to user
 ```
 
 **Never skip or reorder steps. Never start step 5 without explicit user approval.**
+
+The main agent handles Steps 1-5. Step 5 spawns a conductor-execute sub-agent (haiku) that drives the worker loop: spawn workers in dependency order, collect results, return synthesis DSL. Main agent reads synthesis DSL and reports to user (Step 6).
 
 ---
 
@@ -74,13 +85,6 @@ State what the overall workflow succeeds at — the integration-level check
 the main agent performs after all workers complete. Example:
 > "Email validation is implemented, passes all new tests, and reviewer approves with no critical findings."
 
-### Model selection
-
-| Role | Model | When to use sonnet instead |
-|------|-------|---------------------------|
-| coder | `haiku` | Multi-file refactor, architectural changes |
-| reviewer | `sonnet` | Always |
-| tester | `haiku` | Complex strategy, edge-case analysis |
 
 ---
 
@@ -119,19 +123,21 @@ If the user requests changes, update the plan and confirm again before proceedin
 
 Only reached after explicit user approval.
 
-### Create bd issues
+### Setup
 
-> **Note:** `$CLAUDE_PLUGIN_ROOT` is injected into agent prompts by Claude Code but is
-> **not** available as a shell environment variable when the conductor runs Bash commands.
-> Resolve the scripts path once at the start of step 5:
-> ```bash
-> SKILL_SCRIPTS="$HOME/.claude/plugins/llm-dsl/skills/llm-dsl/scripts"
-> ```
+At the start of Step 5, define:
 
 ```bash
+SKILL_SCRIPTS="/home/tue/code/ai/llm-dsl/skills/llm-dsl/scripts"
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
+```
 
-BD_CODER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py \
+Note: `$CLAUDE_PLUGIN_ROOT` is not available in conductor bash. Use `SKILL_SCRIPTS` above.
+
+### Create bd issues
+
+```bash
+BD_CODER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
   --title "Implement: Add email validation" \
   --agent coder --run-id "$RUN_ID" \
   --acceptance "validate_email() exists in src/validation/email.py" \
@@ -141,7 +147,7 @@ BD_CODER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py 
 [out src/validation/email.py]
 [/task]')
 
-BD_REVIEWER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py \
+BD_REVIEWER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
   --title "Review: email validation" \
   --agent reviewer --run-id "$RUN_ID" \
   --depends-on "$BD_CODER" \
@@ -151,7 +157,7 @@ BD_REVIEWER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.
 [ref t1.artifacts]
 [/task]')
 
-BD_TESTER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py \
+BD_TESTER=$(python3 $SKILL_SCRIPTS/bd_create_task.py \
   --title "Test: email validation" \
   --agent tester --run-id "$RUN_ID" \
   --depends-on "$BD_CODER" \
@@ -163,26 +169,52 @@ BD_TESTER=$(python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py
 [/task]')
 ```
 
-### Spawn sub-agents
+### Spawn conductor-execute
+
+After creating bd issues, build the exec block and spawn the conductor-execute sub-agent:
 
 ```python
-# Coder — foreground (reviewer + tester depend on it)
-Agent(model="haiku", description="Coder: email validation",
-      prompt=<sub_agent_prompt(BD_CODER, "coder")>,
+EXEC_BLOCK = """
+[exec run={RUN_ID}]
+[job id={BD_CODER} role=coder model=haiku]
+[job id={BD_REVIEWER} role=reviewer model=sonnet depends={BD_CODER}]
+[job id={BD_TESTER} role=tester model=haiku depends={BD_CODER}]
+[/exec]
+"""
+
+Agent(model="haiku", description="Conductor-execute",
+      prompt=<conductor_execute_prompt(EXEC_BLOCK, CLAUDE_PROJECT_DIR)>,
       run_in_background=False)
-
-# Reviewer + tester — parallel
-Agent(model="sonnet", description="Reviewer: email validation",
-      prompt=<sub_agent_prompt(BD_REVIEWER, "reviewer")>,
-      run_in_background=True)
-Agent(model="haiku", description="Tester: email validation",
-      prompt=<sub_agent_prompt(BD_TESTER, "tester")>,
-      run_in_background=True)
 ```
 
-### Sub-agent prompt template
+### Conductor-execute prompt template
 
 ```
+You are a conductor-execute sub-agent. Run a pre-planned set of bd tasks in dependency order.
+
+Project directory: <CLAUDE_PROJECT_DIR>
+All file reads and writes must be inside this directory.
+Run all shell commands from this directory.
+
+Your exec block:
+<EXEC_BLOCK>
+
+Instructions:
+1. Parse the [exec] block to get the list of [job] entries.
+2. Spawn workers in dependency order:
+   - Jobs with no depends: spawn in parallel (run_in_background=True)
+   - Jobs with depends: wait for dependency to complete first (run_in_background=False)
+   - Use the model specified in model= attribute
+   - Use the worker sub-agent prompt template below for each job
+3. After all workers complete, collect results:
+   bd show <id> for each job
+4. Return synthesis DSL:
+   [synthesis run=<run_id> s=ok|partial|fail]
+   [job id=<id> role=<role> s=ok|fail]
+   [/synthesis]
+
+Worker sub-agent prompt template:
+---
 You are a <role> sub-agent. Your task is in bd issue <bd_id>.
 
 Project directory: <CLAUDE_PROJECT_DIR>
@@ -192,18 +224,14 @@ Run all shell commands from this directory.
 1. Read your task and acceptance criteria:
    bd show <bd_id>
 
-2. Do the work described in [goal], staying within the scope of this issue only:
-   coder    → implement code changes
-   reviewer → read files in [ref], produce findings
-   tester   → write + run tests, report counts
+2. Do the work described in [goal], staying within the scope of this issue only.
 
-3. Verify your work meets the acceptance criteria before writing the result.
+3. Verify your work meets every acceptance criterion before writing the result.
 
 4. Write result:
    bd update <bd_id> --body-file - << 'DSL'
-   [result id=<task_id> s=ok]
+   [result id=<task_id> s=ok|partial|fail|blocked]
    [artifact path=<path> a=new|mod|del n=<lines>]
-   [added fn=<name> in:<type> out:<type>]
    [suite t=<N> p=<N> f=<N>]
    [verdict approve|request-changes|block]
    [note sev=crit|major|minor|info at=<file>:<line>]<text>[/note]
@@ -213,9 +241,10 @@ Run all shell commands from this directory.
 5. Close: bd close <bd_id>
 
 Rules:
-- Do NOT create additional bd issues or touch files outside your task scope
-- If you cannot meet the acceptance criteria: write s=blocked, explain why
-- Do NOT proceed past your scope even if you see related issues
+- Do NOT create additional bd issues
+- Do NOT touch files outside your task scope
+- If you cannot meet any acceptance criterion: write s=blocked, explain why
+---
 ```
 
 ### Crash recovery
@@ -229,23 +258,72 @@ bd list --label "run=$RUN_ID" --status open   # find stalled issues
 
 ## Step 6 — Synthesize
 
-Collect all results:
+After conductor-execute returns the synthesis DSL, the main agent:
 
-```bash
-bd show <bd_id> | python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/dsl_parse.py --pretty
-```
+1. Parses the synthesis block to check job statuses
+2. Reads each job's bd issue to collect detailed results
+3. Checks against the Definition of Done:
+   - Did all acceptance criteria pass?
+   - Any critical/major findings from reviewer?
+   - Any test failures?
+4. Reports to user in plain NL:
+   - What was done (files changed, functions added)
+   - Test results (pass/fail counts)
+   - Review verdict and any findings
+   - Whether the DoD was met
+   - Any action items if DoD was not met
 
-Check against the Definition of Done:
-- Did all acceptance criteria pass?
-- Any critical/major findings from reviewer?
-- Any test failures?
+---
 
-Report to user in plain NL:
-- What was done (files changed, functions added)
-- Test results (pass/fail counts)
-- Review verdict and any findings
-- Whether the DoD was met
-- Any action items if DoD was not met
+## Model Selection Framework
+
+### Default model assignment
+
+| Role | Default model |
+|------|--------------|
+| coder | haiku |
+| reviewer | sonnet |
+| tester | haiku |
+
+### Escalation rules (main agent decides at Step 3)
+
+**Escalate coder to sonnet when:**
+- Multi-file refactor touching >3 files
+- auth / payments / security-critical code
+- New module or architectural boundary
+
+**Escalate reviewer to opus when:**
+- auth, payments, or data migration changes
+- Public API surface changes
+
+Model is encoded in the `[exec]` block `[job model=...]` attribute. Conductor-execute reads and applies it — no heuristics in the executor.
+
+---
+
+## Code Style for Sub-Agents
+
+Sub-agents generating code MUST follow these rules. No exceptions.
+
+### Naming
+
+- Functions: `snake_case`, abbreviated but inferrable (`val_email` not `validate_email_address`)
+- Classes: `PascalCase`, abbreviated (`EmailVal` not `EmailValidator`)
+- Local variables: Go-style short (`n`, `r`, `buf`, `err`, `ok`, `fn`, `val`, `idx`)
+
+### Comments and docs
+
+- No docstrings. Ever.
+- No inline comments.
+- Type hints on public functions only. Not on private helpers, not on local variables.
+
+### Formatting
+
+- No blank lines between class methods.
+- Single blank line between top-level functions.
+- f-strings only for string interpolation.
+- MUST use list/dict comprehensions instead of explicit loops for single-line operations.
+- Use `...` not `pass` in stubs or abstract methods.
+- Imports: no blank lines between import groups (stdlib, third-party, local all contiguous).
 
 ---
 
@@ -278,6 +356,23 @@ Report to user in plain NL:
 [/result]
 ```
 
+### Exec (main agent → conductor-execute)
+
+```
+[exec run=<run_id>]
+[job id=<bd_id> role=coder|reviewer|tester model=haiku|sonnet|opus]
+[job id=<bd_id> role=reviewer model=sonnet depends=<bd_id>]
+[/exec]
+```
+
+### Synthesis (conductor-execute → main agent)
+
+```
+[synthesis run=<run_id> s=ok|partial|fail]
+[job id=<bd_id> role=<role> s=ok|fail]
+[/synthesis]
+```
+
 **Attribute quick-ref:**
 
 | Abbrev | Meaning |
@@ -307,17 +402,17 @@ bd close <id>
 
 ```bash
 # Create bd issue with acceptance criteria
-python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_create_task.py \
+python3 $SKILL_SCRIPTS/bd_create_task.py \
   --title "..." --agent coder --run-id "$RUN_ID" \
   --acceptance "condition 1" --acceptance "condition 2" \
   --body '[task ...]'
 
 # Parse DSL → JSON
-bd show <id> | python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/dsl_parse.py --pretty
+bd show <id> | python3 $SKILL_SCRIPTS/dsl_parse.py --pretty
 
 # Validate DSL
-python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/dsl_validate.py --file task.txt
+python3 $SKILL_SCRIPTS/dsl_validate.py --file task.txt
 
 # Collect molecule results
-python3 $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/scripts/bd_collect.py --mol-id <mol_id> --pretty
+python3 $SKILL_SCRIPTS/bd_collect.py --mol-id <mol_id> --pretty
 ```
