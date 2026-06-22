@@ -62,7 +62,7 @@ The scripts wrap our Python tools for command-line use:
 
 ```bash
 # Parse DSL from text
-python3 scripts/dsl_parse.py '[result id=t1 status=complete]...'
+python3 scripts/dsl_parse.py '[result id=t1 s=ok]...'
 
 # Validate DSL against schema
 python3 scripts/dsl_validate.py --schema code-task '[task ...]'

@@ -1,14 +1,14 @@
 {
-  "timestamp": "2026-06-20T16:08:04.986042",
+  "timestamp": "2026-06-22T11:39:16.935828",
   "model": "default",
-  "passed": 5,
+  "passed": 3,
   "total": 5,
   "results": [
     {
       "test_id": "code-task-1",
       "name": "Code implementation result",
       "type": "coder",
-      "extracted_dsl": "[result id=t1 status=complete]\n[artifact type=file path=src/utils/currency.py action=created lines=35]\n[artifact type=file path=src/app.py action=modified lines=+8]\n[added fn=format_currency in:float out:str]\n[/result]",
+      "extracted_dsl": "[result id=t1 s=ok][artifact a=new n=35 path=src/utils/currency.py][artifact a=mod n=+8 path=src/app.py][added fn=format_currency in:Decimal out:str][/result]",
       "has_dsl": true,
       "parses": true,
       "parse_error": null,
@@ -16,80 +16,82 @@
         "result",
         "artifact",
         "added",
-        "status=complete"
+        "s=ok"
       ],
       "expected_tags_missing": [],
-      "nl_expansion": "Code: Added format_currency(float) -> str. Files: Created src/utils/currency.py (35 lines), Modified src/app.py (+8 lines).",
+      "nl_expansion": "Code: Added format_currency(Decimal) -> str. Files: Created src/utils/currency.py (35 lines), Modified src/app.py (+8 lines).",
       "overall_pass": true
     },
     {
       "test_id": "review-task-1",
       "name": "Code review result",
       "type": "reviewer",
-      "extracted_dsl": "[result id=t2 status=complete]\n[verdict approve]\n[finding severity=minor path=src/auth.py:23]\nUse bcrypt instead of MD5 for password hashing.\n[/finding]\n[/result]",
+      "extracted_dsl": "[result id=pr-auth-review s=ok][verdict approve][note at=src/auth.py:23 sev=minor]Replace MD5 password hash with bcrypt; MD5 is unsuitable for password storage.[/note][/result]",
       "has_dsl": true,
       "parses": true,
       "parse_error": null,
       "expected_tags_found": [
         "result",
         "verdict",
-        "finding",
-        "status=complete"
+        "note",
+        "s=ok"
       ],
       "expected_tags_missing": [],
-      "nl_expansion": "Review: Approved. Findings: Minor finding at src/auth.py:23: Use bcrypt instead of MD5 for password hashing.. ",
+      "nl_expansion": "Review: Approved. Findings: Minor finding at src/auth.py:23: Replace MD5 password hash with bcrypt; MD5 is unsuitable for password storage.. ",
       "overall_pass": true
     },
     {
       "test_id": "test-task-1",
       "name": "Test results",
       "type": "tester",
-      "extracted_dsl": "[result id=t3 status=complete]\n[artifact type=file path=tests/test_cart.py action=created lines=60]\n[test-suite total=14 pass=12 fail=2]\n[test name=test_add_item status=pass]\n[test name=test_remove_item status=pass]\n[test name=test_oversized_item status=fail reason=\"weight limit not enforced\"]\n[test name=test_concurrency_race status=fail reason=\"race condition in cart update\"]\n[/test-suite]\n[/result]",
+      "extracted_dsl": "[result id=t1 s=partial][artifact a=new n=60 path=tests/test_cart.py][suite t=14 p=12 f=2][test name=test_oversized_item s=fail reason=\"weight limit not enforced\"][test name=test_concurrency_race s=fail reason=\"race condition in cart update\"][/suite][/result]",
       "has_dsl": true,
       "parses": true,
       "parse_error": null,
       "expected_tags_found": [
         "result",
         "artifact",
-        "test-suite",
-        "test",
-        "status=complete"
+        "suite",
+        "test"
       ],
-      "expected_tags_missing": [],
+      "expected_tags_missing": [
+        "s=ok (got 'partial')"
+      ],
       "nl_expansion": "Tests: 12 of 14 tests pass, . test_oversized_item failed: weight limit not enforced. test_concurrency_race failed: race condition in cart update.",
-      "overall_pass": true
+      "overall_pass": false
     },
     {
       "test_id": "error-task-1",
       "name": "Failed task",
       "type": "coder",
-      "extracted_dsl": "[result id=t1 status=failed]\n[finding severity=critical path=redis:localhost:6379]\nRedis server is not running. Connection refused on localhost:6379. Unable to implement or test the Redis cache layer without a running Redis instance.\n[/finding]\n[finding severity=info path=redis:localhost:6379]\nTo resolve: start the Redis server with `redis-server` or `sudo systemctl start redis`, then retry the cache layer implementation.\n[/finding]\n[/result]",
+      "extracted_dsl": "[result id=redis-cache s=blocked][note sev=crit]Redis server unreachable at localhost:6379 (connection refused); cache layer implementation cannot proceed until Redis is running.[/note][/result]",
       "has_dsl": true,
       "parses": true,
       "parse_error": null,
       "expected_tags_found": [
-        "result",
-        "status=failed"
+        "result"
       ],
-      "expected_tags_missing": [],
+      "expected_tags_missing": [
+        "s=fail (got 'blocked')"
+      ],
       "nl_expansion": "Code: No changes. Files: .",
-      "overall_pass": true
+      "overall_pass": false
     },
     {
       "test_id": "minimal-task-1",
       "name": "Minimal valid response",
       "type": "coder",
-      "extracted_dsl": "[result id=t1 status=complete]\n[artifact type=file path=README.md action=modified lines=1]\n[/result]",
+      "extracted_dsl": "[result id=typo-fix s=ok][artifact a=mod n=+1 path=README.md][/result]",
       "has_dsl": true,
       "parses": true,
       "parse_error": null,
       "expected_tags_found": [
         "result",
         "artifact",
-        "status=complete"
+        "s=ok"
       ],
       "expected_tags_missing": [],
-      "nl_expansion": "Code: No changes. Files: Modified README.md (1 lines).",
+      "nl_expansion": "Code: No changes. Files: Modified README.md (+1 lines).",
       "overall_pass": true
     }
   ]

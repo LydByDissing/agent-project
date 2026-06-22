@@ -52,9 +52,9 @@ User reads DSL summary
 ### Result Issue (updated by subagent)
 
 ```markdown
-[result id=t1 status=complete]
-[artifact type=file path=src/handlers/user.py action=modified lines=+23]
-[artifact type=file path=src/validation/user_schema.py action=created lines=18]
+[result id=t1 s=ok]
+[artifact a=mod n=+23 path=src/handlers/user.py]
+[artifact a=new n=18 path=src/validation/user_schema.py]
 [added fn=validate_user_input in:RequestBody out:ValidationResult]
 [complexity delta="+2cyclomatic"]
 [/result]
@@ -63,18 +63,18 @@ User reads DSL summary
 ### Summary Issue (created by main agent)
 
 ```markdown
-[summary id=s1 status=complete]
-[agent type=coder status=complete]
-  [files changed=2 added=21 removed=0]
-  [artifacts path=src/handlers/user.py action=modified]
-  [artifacts path=src/validation/user_schema.py action=created]
+[summary id=s1 s=ok]
+[agent s=ok type=coder]
+  [files added=21 changed=2 removed=0]
+  [artifacts a=mod path=src/handlers/user.py]
+  [artifacts a=new path=src/validation/user_schema.py]
 [/agent]
-[agent type=reviewer status=complete]
+[agent s=ok type=reviewer]
   [verdict approve]
-  [findings count=1 severity=minor]
+  [findings count=1 sev=minor]
 [/agent]
-[agent type=tester status=complete]
-  [tests total=8 pass=7 fail=1]
+[agent s=ok type=tester]
+  [tests f=1 p=7 t=8]
   [failures name=test_sql_injection reason="input not sanitized"]
 [/agent]
 [action-items]
@@ -99,7 +99,7 @@ bd dep add llm-dsl-yyy --on llm-dsl-xxx
 
 # Subagent updates result
 bd update llm-dsl-xxx --body-file - <<'EOF'
-[result id=t1 status=complete]...[/result]
+[result id=t1 s=ok]...[/result]
 EOF
 
 # Subagent closes
@@ -114,7 +114,7 @@ bd show llm-dsl-zzz
 bd create "Summary: Add validation" \
   --labels "agent=main,type=summary" \
   --body-file - <<'EOF'
-[summary id=s1 status=complete]...[/summary]
+[summary id=s1 s=ok]...[/summary]
 EOF
 ```
 

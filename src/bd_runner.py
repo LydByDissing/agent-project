@@ -232,7 +232,7 @@ class BdPipelineRunner:
                         "bd_id": bd_id,
                         "dsl": dsl,
                         "parsed": parsed,
-                        "status": parsed.get_attr("status", "unknown"),
+                        "status": parsed.get_attr("s", "unknown"),
                         "artifacts": parsed.children_by_tag("artifact"),
                         "parsed_ok": True,
                     }

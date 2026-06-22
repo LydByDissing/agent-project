@@ -14,13 +14,13 @@ from typing import Any
 
 def _expand_artifact(node: DslNode) -> str:
     path = node.get_attr("path")
-    action = node.get_attr("action")
-    lines = node.get_attr("lines", "")
+    action = node.get_attr("a")
+    lines = node.get_attr("n", "")
 
     action_map = {
-        "created": "Created",
-        "modified": "Modified",
-        "deleted": "Deleted",
+        "new": "Created",
+        "mod": "Modified",
+        "del": "Deleted",
     }
     verb = action_map.get(action, action.capitalize() if action else "Changed")
 
@@ -53,22 +53,25 @@ def _expand_verdict(node: DslNode) -> str:
     return mapping.get(text, text.capitalize() if text else "Unknown verdict")
 
 
-def _expand_finding(node: DslNode) -> str:
-    severity = node.get_attr("severity", "info")
-    path = node.get_attr("path", "")
+def _expand_note(node: DslNode) -> str:
+    """Expand [note]. With sev= it's a review finding; without, free-form text."""
+    severity = node.get_attr("sev")
+    location = node.get_attr("at", "")
     text = node.text.strip()
-    loc = f" at {path}" if path else ""
-    return f"{severity.capitalize()} finding{loc}: {text}"
+    if severity:
+        loc = f" at {location}" if location else ""
+        return f"{severity.capitalize()} finding{loc}: {text}"
+    return text
 
 
 def _expand_test_suite(node: DslNode) -> str:
-    total = node.get_attr("total", "?")
-    pass_count = node.get_attr("pass", "?")
-    fail_count = node.get_attr("fail", "0")
+    total = node.get_attr("t", "?")
+    pass_count = node.get_attr("p", "?")
+    fail_count = node.get_attr("f", "0")
 
     parts = [f"{pass_count} of {total} tests pass"]
     tests = node.children_by_tag("test")
-    failures = [t for t in tests if t.get_attr("status") == "fail"]
+    failures = [t for t in tests if t.get_attr("s") == "fail"]
     if failures:
         fail_parts = []
         for t in failures:
@@ -81,7 +84,7 @@ def _expand_test_suite(node: DslNode) -> str:
 
 def _expand_error(node: DslNode) -> str:
     code = node.get_attr("code", "unknown")
-    severity = node.get_attr("severity", "unknown")
+    severity = node.get_attr("sev", "unknown")
     detail_node = node.child("detail")
     detail = detail_node.text.strip() if detail_node else ""
     if detail:
@@ -102,7 +105,7 @@ def _expand_complexity(node: DslNode) -> str:
 def _expand_passthrough(node: DslNode) -> str:
     """Generic expansion for unknown/passthrough tags."""
     tag = node.tag
-    status = node.get_attr("status", "")
+    status = node.get_attr("s", "")
     text = node.text.strip()
     if status and text:
         return f"{tag}: {status}. {text}"
@@ -120,8 +123,8 @@ _TAG_EXPANDERS: dict[str, Any] = {
     "added": _expand_added,
     "removed": _expand_removed,
     "verdict": _expand_verdict,
-    "finding": _expand_finding,
-    "test-suite": _expand_test_suite,
+    "note": _expand_note,
+    "suite": _expand_test_suite,
     "error": _expand_error,
     "file": _expand_file,
     "complexity": _expand_complexity,
@@ -136,7 +139,7 @@ def expand_node(node: DslNode) -> str:
     if node.passthrough or node.tag not in ("task", "result", "goal", "spec",
                                             "test-cases", "case", "focus",
                                             "context-ref", "output-artifact",
-                                            "test", "note", "style",
+                                            "test", "style",
                                             "security-check", "on-invalid",
                                             "field"):
         return _expand_passthrough(node)
@@ -189,10 +192,10 @@ def _extract_reviewer_data(result: DslNode) -> dict[str, str]:
     verdict_node = result.child("verdict")
     verdict = _expand_verdict(verdict_node) if verdict_node else "No verdict"
 
-    findings = result.children_by_tag("finding")
+    findings = [n for n in result.children_by_tag("note") if n.get_attr("sev")]
     findings_text = ""
     if findings:
-        findings_text = "Findings: " + ". ".join(_expand_finding(f) for f in findings)
+        findings_text = "Findings: " + ". ".join(_expand_note(f) for f in findings)
 
     security_parts = []
     for child in result.children:
@@ -211,7 +214,7 @@ def _extract_reviewer_data(result: DslNode) -> dict[str, str]:
 
 def _extract_tester_data(result: DslNode) -> dict[str, str]:
     """Extract tester-relevant data from a [result] node."""
-    suite = result.child("test-suite")
+    suite = result.child("suite")
     if suite:
         test_summary = _expand_test_suite(suite)
     else:

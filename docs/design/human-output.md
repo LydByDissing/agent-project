@@ -121,15 +121,15 @@ The expansion from DSL to template data is **static** (no LLM needed):
 
 | DSL construct | Expansion |
 |---------------|-----------|
-| `[artifact type=file path=X action=modified lines=+N]` | "X (+N lines)" |
-| `[artifact type=file path=X action=created]` | "X (new)" |
+| `[artifact path=X a=mod n=+N]` | "X (+N lines)" |
+| `[artifact path=X a=new]` | "X (new)" |
 | `[added fn=F in:A out:B]` | "Added F(A) → B" |
 | `[verdict approve]` | "Approved" |
 | `[verdict request-changes]` | "Changes requested" |
-| `[finding severity=S]` | Prefix with S (minor/major/critical) |
-| [test-suite total=T pass=P fail=F] | "P of T pass, F fail" |
-| `[test name=N status=fail reason=R]` | "N failed: R" |
-| `[security-check status=S]` | "Security: S" |
+| `[note sev=S at=P]text[/note]` | "S finding at P: text" |
+| `[suite t=T p=P f=F]` | "P of T pass, F fail" |
+| `[test name=N s=fail reason=R]` | "N failed: R" |
+| `[security-check s=S]` | "Security: S" |
 | Passthrough tags | Expanded as "Tag content: ..." |
 
 ## Design Decisions

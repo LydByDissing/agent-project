@@ -92,6 +92,8 @@ Only reached after explicit user approval.
 
 Every task MUST carry a `req=` label matching the REQ id identified in Step 3. Omit only for tasks explicitly marked orphan in Step 4 — and even then add `req=orphan` so the query returns them.
 
+**File provenance:** coder and tester workers emit an `[origin]` header (see `docs/design/message-schema.md` §3.8) at the top of every source/test file they create or materially modify. The header links the file to its bd issue (`ref=<bd_id>`), the requirement (`req=REQ-XXX`), and the intent. This is how file → REQ traceability is preserved in the filesystem.
+
 ```bash
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 BD_ROLE=$(bd create "Action: title" --silent \

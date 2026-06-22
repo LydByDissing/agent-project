@@ -99,8 +99,8 @@ def test_dependency_ordering():
 
     # Complete implement
     implement_id = implement_ids[0]
-    bd_update_body(implement_id, """[result id=t1 status=complete]
-[artifact type=file path=src/auth.py action=modified lines=+15]
+    bd_update_body(implement_id, """[result id=t1 s=ok]
+[artifact a=mod n=+15 path=src/auth.py]
 [added fn=validate_token in:Request out:TokenResult]
 [/result]""")
     bd_close(implement_id)
@@ -118,7 +118,7 @@ def test_dependency_ordering():
         info = bd_show(sid)
         status = info.get("status", "")
         if status != "closed":
-            bd_update_body(sid, f"[result status=complete]Done[/result]")
+            bd_update_body(sid, f"[result s=ok]Done[/result]")
             bd_close(sid)
 
     # Verify progress
@@ -143,27 +143,27 @@ def test_collect_results():
 
     # Simulate work: complete each step with DSL results
     results_data = [
-        ("""[result id=t1 status=complete]
-[artifact type=file path=src/middleware/rate_limit.py action=created lines=30]
-[artifact type=file path=src/app.py action=modified lines=+5]
+        ("""[result id=t1 s=ok]
+[artifact a=new n=30 path=src/middleware/rate_limit.py]
+[artifact a=mod n=+5 path=src/app.py]
 [added fn=rate_limit in:Request out:Response]
 [/result]"""),
-        ("""[result id=t2 status=complete]
+        ("""[result id=t2 s=ok]
 [verdict approve]
-[finding severity=minor path=src/middleware/rate_limit.py:12]
+[note at=src/middleware/rate_limit.py:12 sev=minor]
 Consider adding configurable rate limits per endpoint.
-[/finding]
+[/note]
 [/result]"""),
-        ("""[result id=t3 status=complete]
-[artifact type=file path=tests/test_rate_limit.py action=created lines=50]
-[test-suite total=6 pass=5 fail=1]
-[test name=test_basic_rate_limit status=pass]
-[test name=test_burst_allowance status=pass]
-[test name=test_per_endpoint status=pass]
-[test name=test_headers status=pass]
-[test name=test_exemption status=pass]
-[test name=test_concurrent status=fail reason="race condition in counter"]
-[/test-suite]
+        ("""[result id=t3 s=ok]
+[artifact a=new n=50 path=tests/test_rate_limit.py]
+[suite f=1 p=5 t=6]
+[test name=test_basic_rate_limit s=pass]
+[test name=test_burst_allowance s=pass]
+[test name=test_per_endpoint s=pass]
+[test name=test_headers s=pass]
+[test name=test_exemption s=pass]
+[test name=test_concurrent reason="race condition in counter" s=fail]
+[/suite]
 [/result]"""),
     ]
 
@@ -183,7 +183,7 @@ Consider adding configurable rate limits per endpoint.
             print(f"    {r['bd_id']}: ERROR - {r.get('error', 'unknown')}")
 
     assert all(r["parsed_ok"] for r in results), "All results should parse"
-    assert all(r["status"] == "complete" for r in results), "All should be complete"
+    assert all(r["status"] == "ok" for r in results), "All should be ok"
 
 
 def main():

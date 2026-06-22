@@ -234,17 +234,15 @@ def build_subagent_prompt(process: ProcessDefinition, agent_id: str) -> str:
 ### RESPONSE FORMAT
 Respond with ONLY a DSL [result] message. Do NOT include natural language.
 
-[result id=<task-id> status=complete|partial|failed|blocked]
-[artifact type=file path=<path> action=created|modified|deleted lines=<N>]
+[result id=<task-id> s=ok|partial|fail|blocked]
+[artifact path=<path> a=new|mod|del n=<N>]
 [added fn=<name> in:<type> out:<type>]
 [removed fn=<name>]
-[test-suite total=<N> pass=<N> fail=<N>]
-  [test name=<name> status=pass|fail reason=<if-fail>]
-[/test-suite]
+[suite t=<N> p=<N> f=<N>]
+  [test name=<name> s=pass|fail reason=<if-fail>]
+[/suite]
 [verdict approve|request-changes|block]
-[finding severity=critical|major|minor|info path=<file>:<line>]
-<finding text here>
-[/finding]
+[note sev=crit|major|minor|info at=<file>:<line>]<finding text>[/note]
 [complexity delta=<+Ncyclomatic>]
 [/result]
 """
@@ -431,7 +429,7 @@ def run_pipeline(process_path: str, user_input: str,
         try:
             result_parsed = parse_dsl(dsl_result)
             if verbose:
-                print(f"  Parsed OK: status={result_parsed.get_attr('status', '?')}")
+                print(f"  Parsed OK: s={result_parsed.get_attr('s', '?')}")
         except DslParseError as e:
             result.errors.append(f"Subagent {target_agent} result failed to parse: {e}")
             if verbose:

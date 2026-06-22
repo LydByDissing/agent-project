@@ -75,53 +75,53 @@ NL_SUMMARY = (
 # ── DSL messages ──
 
 DSL_IMPLEMENT = (
-    '[result id=t1 status=complete]'
-    '[artifact type=file path=src/handlers/user.py action=modified lines=+23]'
-    '[artifact type=file path=src/validation/user_schema.py action=created lines=18]'
+    '[result id=t1 s=ok]'
+    '[artifact a=mod n=+23 path=src/handlers/user.py]'
+    '[artifact a=new n=18 path=src/validation/user_schema.py]'
     '[added fn=validate_user_input in:RequestBody out:ValidationResult]'
     '[complexity delta="+2cyclomatic"]'
     '[/result]'
 )
 
 DSL_REVIEW = (
-    '[result id=t2 status=complete]'
+    '[result id=t2 s=ok]'
     '[verdict approve]'
-    '[finding severity=minor path=src/handlers/user.py:34]'
+    '[note at=src/handlers/user.py:34 sev=minor]'
     'Email regex does not support international domains. '
     'Consider using email-validator library.'
-    '[/finding]'
+    '[/note]'
     '[/result]'
 )
 
 DSL_TEST = (
-    '[result id=t3 status=complete]'
-    '[artifact type=file path=tests/test_validation.py action=created lines=45]'
-    '[test-suite total=8 pass=7 fail=1]'
-    '[test name=test_valid_input status=pass]'
-    '[test name=test_invalid_email status=pass]'
-    '[test name=test_missing_name status=pass]'
-    '[test name=test_age_high status=pass]'
-    '[test name=test_age_low status=pass]'
-    '[test name=test_boundary status=pass]'
-    '[test name=test_concurrent status=pass]'
-    '[test name=test_sql_injection status=fail reason="SQL chars not sanitized"]'
-    '[/test-suite]'
+    '[result id=t3 s=ok]'
+    '[artifact a=new n=45 path=tests/test_validation.py]'
+    '[suite f=1 p=7 t=8]'
+    '[test name=test_valid_input s=pass]'
+    '[test name=test_invalid_email s=pass]'
+    '[test name=test_missing_name s=pass]'
+    '[test name=test_age_high s=pass]'
+    '[test name=test_age_low s=pass]'
+    '[test name=test_boundary s=pass]'
+    '[test name=test_concurrent s=pass]'
+    '[test name=test_sql_injection reason="SQL chars not sanitized" s=fail]'
+    '[/suite]'
     '[/result]'
 )
 
 DSL_SUMMARY = (
-    '[summary id=s1 status=complete]'
-    '[agent type=coder status=complete]'
-    '[files changed=2 added=21 removed=0]'
-    '[artifacts path=src/handlers/user.py action=modified]'
-    '[artifacts path=src/validation/user_schema.py action=created]'
+    '[summary id=s1 s=ok]'
+    '[agent s=ok type=coder]'
+    '[files added=21 changed=2 removed=0]'
+    '[artifacts a=mod path=src/handlers/user.py]'
+    '[artifacts a=new path=src/validation/user_schema.py]'
     '[/agent]'
-    '[agent type=reviewer status=complete]'
+    '[agent s=ok type=reviewer]'
     '[verdict approve]'
-    '[findings count=1 severity=minor]'
+    '[findings count=1 sev=minor]'
     '[/agent]'
-    '[agent type=tester status=complete]'
-    '[tests total=8 pass=7 fail=1]'
+    '[agent s=ok type=tester]'
+    '[tests f=1 p=7 t=8]'
     '[failures name=test_sql_injection reason="SQL chars not sanitized"]'
     '[/agent]'
     '[action-items]'
@@ -190,14 +190,14 @@ def benchmark_iterative(n_iterations=3):
             f"validation logic. All tests pass now."
         )
         dsl_parts.append(
-            f'[result id=t{i+10} status=complete]'
-            f'[finding severity=minor path=src/handlers/user.py:{34+i}]'
+            f'[result id=t{i+10} s=ok]'
+            f'[note at=src/handlers/user.py:{34+i} sev=minor]'
             f'Validation logic needs adjustment'
-            f'[/finding]'
+            f'[/note]'
             f'[verdict request-changes]'
             f'[/result]'
-            f'[result id=t{i+11} status=complete]'
-            f'[artifact type=file path=src/handlers/user.py action=modified lines="+{5+i}"]'
+            f'[result id=t{i+11} s=ok]'
+            f'[artifact a=mod n="+{5+i}" path=src/handlers/user.py]'
             f'[/result]'
         )
 
@@ -230,8 +230,8 @@ def benchmark_context_accumulation(n_steps=5):
             f"All tests pass."
         )
         dsl_msg = (
-            f'[result id=t{i+1} status=complete]'
-            f'[artifact type=file path=file_{i+1}.py action=modified lines="+{10+i*5}"]'
+            f'[result id=t{i+1} s=ok]'
+            f'[artifact a=mod n="+{10+i*5}" path=file_{i+1}.py]'
             f'[/result]'
         )
         nl_total += count_tokens(nl_msg)
@@ -252,18 +252,18 @@ def benchmark_round_trip_fidelity():
     reserialized = parsed.to_wire()
 
     checks = [
-        ("status=complete", parsed.attrs.get("status") == "complete"),
+        ("s=ok", parsed.attrs.get("s") == "ok"),
         ("artifact count", len(parsed.children_by_tag("artifact")) == 2),
         ("file paths", all(
             a.get_attr("path") in ["src/handlers/user.py", "src/validation/user_schema.py"]
             for a in parsed.children_by_tag("artifact")
         )),
         ("action types", all(
-            a.get_attr("action") in ["modified", "created"]
+            a.get_attr("a") in ["mod", "new"]
             for a in parsed.children_by_tag("artifact")
         )),
         ("line counts", all(
-            a.get_attr("lines") in ["+23", "18"]
+            a.get_attr("n") in ["+23", "18"]
             for a in parsed.children_by_tag("artifact")
         )),
         ("added fn", parsed.child("added").get_attr("fn") == "validate_user_input"),
