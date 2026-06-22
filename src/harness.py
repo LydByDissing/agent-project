@@ -87,17 +87,12 @@ SIMULATED_RESPONSES: dict[str, str] = {
         '[verdict approve]'
         '[/result]'
     ),
+    # Failures-only convention: enumerate only [test] children that failed.
+    # Pass counts live in [suite t=N p=N f=N]; passing tests don't take tokens.
     "t3": (
         '[result id=t3 s=ok]'
         '[artifact a=new n=45 path=tests/test_user_validation.py]'
-        '[suite f=1 p=7 t=8]'
-        '[test name=test_age_boundary_0 s=pass]'
-        '[test name=test_age_boundary_150 s=pass]'
-        '[test name=test_age_boundary_neg1 s=pass]'
-        '[test name=test_age_200 s=pass]'
-        '[test name=test_invalid_email s=pass]'
-        '[test name=test_missing_name s=pass]'
-        '[test name=test_valid_full_input s=pass]'
+        '[suite t=8 p=7 f=1]'
         '[test name=test_sql_injection_name reason="Input not sanitized — SQL chars pass through" s=fail]'
         '[/suite]'
         '[/result]'
@@ -112,7 +107,12 @@ def _count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
 
 
 def _build_coder_task() -> str:
-    """Build the M1 task message (Main -> Coder)."""
+    """Build the M1 task message (Main -> Coder).
+
+    Output paths are NOT pre-specified: the coder derives them from the
+    spec + the file being modified. Saves tokens and matches how real
+    coder agents already operate.
+    """
     return (
         '[task id=t1 type=code]'
         '[goal]Add input validation to POST /users endpoint[/goal]'
@@ -123,25 +123,29 @@ def _build_coder_task() -> str:
         '[field name=age required=false type=int rule=range:0-150]'
         '[on-invalid format=standard-error status=422]'
         '[/spec]'
-        '[output-artifact path=src/handlers/user.py]'
-        '[output-artifact path=src/validation/user_schema.py]'
         '[/task]'
     )
 
 
 def _build_reviewer_task() -> str:
-    """Build the M2 task message (Main -> Reviewer)."""
+    """Build the M2 task message (Main -> Reviewer).
+
+    No [focus] — the reviewer always covers correctness, security, and style.
+    Re-introduce only if a future caller needs partial coverage.
+    """
     return (
         '[task id=t2 type=review]'
         '[goal]Review validation code for correctness, security, style[/goal]'
         '[context-ref id=t1.artifacts]'
-        '[focus correctness=true security=true style=true]'
         '[/task]'
     )
 
 
 def _build_tester_task() -> str:
-    """Build the M3 task message (Main -> Tester)."""
+    """Build the M3 task message (Main -> Tester).
+
+    Test-file path is implicit (tester decides based on convention).
+    """
     return (
         '[task id=t3 type=test]'
         '[goal]Write and run tests for user input validation[/goal]'
@@ -152,7 +156,6 @@ def _build_tester_task() -> str:
         '[case]missing name -> 422[/case]'
         '[case]age 200 -> 422[/case]'
         '[/test-cases]'
-        '[output-artifact path=tests/test_user_validation.py]'
         '[/task]'
     )
 

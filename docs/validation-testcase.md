@@ -64,8 +64,6 @@ User ◀──NL── Main Agent
     [field name=age required=false type=int rule=range:0-150]
     [on-invalid status=422 format=standard-error]
   [/spec]
-  [output-artifact path=src/handlers/user.py]
-  [output-artifact path=src/validation/user_schema.py]
 [/task]
 ```
 
@@ -75,10 +73,10 @@ User ◀──NL── Main Agent
 [task id=t2 type=review]
   [goal]Review validation code for correctness, security, style[/goal]
   [context-ref id=t1.artifacts]
-  [focus security=true style=true correctness=true]
-  [schema-review]true[/schema-review]
 [/task]
 ```
+
+The reviewer always covers correctness, security, and style — no `[focus]` tag is needed.
 
 ### Message 3: Main Agent → Tester (DSL)
 
@@ -92,9 +90,10 @@ User ◀──NL── Main Agent
     [case]missing name → 422[/case]
     [case]=age 200 → 422[/case]
   [/test-cases]
-  [output-artifact path=tests/test_user_validation.py]
 [/task]
 ```
+
+The tester derives the test-file path from convention — no `[output-artifact]` tag.
 
 ### Message 4: Coder → Main Agent (DSL)
 
@@ -130,19 +129,14 @@ User ◀──NL── Main Agent
 ```dsl
 [result id=t3 s=ok]
   [artifact a=new n=45 path=tests/test_user_validation.py]
-  [suite f=1 p=7 t=8]
-    [test name=test_age_boundary_150 s=pass]
-    [test name=test_age_boundary_neg1 s=pass]
-    [test name=test_missing_name s=pass]
-    [test name=test_invalid_email s=pass]
-    [test name=test_valid_full_input s=pass]
-    [test name=test_age_200 s=pass]
-    [test name=test_age_boundary_0 s=pass]
+  [suite t=8 p=7 f=1]
     [test name=test_sql_injection_name
            reason="Input not sanitized — SQL chars pass through" s=fail]
   [/suite]
 [/result]
 ```
+
+`[suite]` enumerates only failing tests — pass counts live in `t=`, `p=`, `f=`. Passing tests aren't listed.
 
 ### Message 7: Main Agent → User (Natural Language)
 

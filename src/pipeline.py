@@ -13,6 +13,7 @@ from __future__ import annotations
 import subprocess
 import json
 import tiktoken
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 from pathlib import Path
@@ -33,7 +34,8 @@ class PipelineMessage:
     raw_text: str          # Raw LLM output
     dsl_text: str          # Extracted DSL
     parsed: Any = None     # Parsed DslNode
-    tokens: int = 0
+    tokens: int = 0        # tiktoken count of dsl_text (DSL-content cost)
+    usage: dict = field(default_factory=dict)  # CLI-reported wire usage
 
 
 @dataclass
@@ -43,41 +45,109 @@ class PipelineResult:
     total_tokens: int = 0
     dsl_tokens: int = 0
     nl_tokens: int = 0
+    # Wire-level usage rolled up from CLI calls (when available).
+    wire_input_tokens: int = 0
+    wire_output_tokens: int = 0
+    wire_cache_read_tokens: int = 0
+    wire_cache_creation_tokens: int = 0
     success: bool = False
     errors: list[str] = field(default_factory=list)
 
 
 # ── CLI Agent Interface ──
 
+# Tools the Claude Code CLI exposes by default. DSL-only sub-agents need
+# none of them; passing this list to --disallowed-tools shrinks the tool
+# catalog the model conditions on.
+_CLAUDE_TOOLS_TO_DISABLE = [
+    "Bash", "BashOutput", "KillShell",
+    "Read", "Write", "Edit", "NotebookEdit",
+    "Glob", "Grep",
+    "WebFetch", "WebSearch",
+    "Task", "TodoWrite",
+    "SlashCommand",
+]
+
+
 def call_agent(system_prompt: str, user_prompt: str,
                agent: str = "pi", model: str = "",
-               timeout: int = 120) -> tuple[str, bool]:
-    """Call a CLI agent in non-interactive mode."""
+               timeout: int = 120,
+               replace_system_prompt: bool = True,
+               disable_tools: bool = True) -> tuple[str, bool, dict]:
+    """Call a CLI agent in non-interactive mode.
+
+    Args:
+        system_prompt: Role prompt for the agent.
+        user_prompt: User message.
+        agent: "claude" or "pi".
+        model: Optional model override.
+        timeout: Seconds before subprocess is killed.
+        replace_system_prompt: When True (and agent=claude), use --system-prompt
+            (replaces the default preamble) instead of --append-system-prompt.
+        disable_tools: When True (and agent=claude), disable the tool catalog
+            via --disallowed-tools.
+
+    Returns:
+        (text, success, usage). `usage` is the CLI's reported token usage when
+        --output-format json is used (claude path); empty dict otherwise.
+    """
+    usage: dict = {}
+
     if agent == "claude":
-        cmd = ["claude", "--print", "--output-format", "text",
-               "--append-system-prompt", system_prompt]
+        cmd = ["claude", "--print", "--output-format", "json"]
+        if replace_system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
+        else:
+            cmd.extend(["--append-system-prompt", system_prompt])
         if model:
             cmd.extend(["--model", model])
-    elif agent == "pi":
-        cmd = ["pi", "--print",
-               "--append-system-prompt", system_prompt]
-        if model:
-            cmd.extend(["--model", model])
-    else:
-        return f"Unknown agent: {agent}", False
+        if disable_tools:
+            cmd.append("--disallowed-tools")
+            cmd.extend(_CLAUDE_TOOLS_TO_DISABLE)
+        # Pass the user prompt via stdin so it doesn't collide with the
+        # variadic --disallowed-tools list.
+        try:
+            result = subprocess.run(
+                cmd, input=user_prompt,
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return f"CLI timeout (>{timeout}s)", False, usage
+        except FileNotFoundError:
+            return "claude CLI not found", False, usage
 
-    cmd.append(user_prompt)
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             stderr = result.stderr[:500] if result.stderr else "(no stderr)"
-            return f"CLI error (exit {result.returncode}): {stderr}", False
-        return result.stdout.strip(), True
-    except subprocess.TimeoutExpired:
-        return f"CLI timeout (>{timeout}s)", False
-    except FileNotFoundError:
-        return f"{agent} CLI not found", False
+            return f"CLI error (exit {result.returncode}): {stderr}", False, usage
+
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            return f"CLI returned non-JSON ({e}): {result.stdout[:300]}", False, usage
+
+        usage = payload.get("usage", {}) or {}
+        if payload.get("is_error"):
+            return (f"CLI reported error: {payload.get('api_error_status', 'unknown')}",
+                    False, usage)
+        return (payload.get("result", "") or "").strip(), True, usage
+
+    if agent == "pi":
+        cmd = ["pi", "--print", "--append-system-prompt", system_prompt]
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append(user_prompt)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return f"CLI timeout (>{timeout}s)", False, usage
+        except FileNotFoundError:
+            return "pi CLI not found", False, usage
+        if result.returncode != 0:
+            stderr = result.stderr[:500] if result.stderr else "(no stderr)"
+            return f"CLI error (exit {result.returncode}): {stderr}", False, usage
+        return result.stdout.strip(), True, usage
+
+    return f"Unknown agent: {agent}", False, usage
 
 
 def count_tokens(text: str) -> int:
@@ -88,164 +158,92 @@ def count_tokens(text: str) -> int:
 # ── Prompt Construction ──
 
 def build_main_agent_prompt(process: ProcessDefinition) -> str:
-    """Build the main agent's system prompt.
+    """Build the main agent's system prompt — decompose-only.
 
-    The main agent needs:
-    1. DSL schema reference (how to produce valid DSL)
-    2. Process definition (agents, schemas, composition)
-    3. Instructions for NL→DSL decomposition
-    4. Instructions for DSL→NL aggregation
+    Aggregation is static (src/translator.py), so the main agent never sees a
+    Phase-3 prompt. Keep this prompt to: a one-line role, the sub-agent roster
+    (label + description + accepted task types), one task example, and the
+    output rule.
     """
-    # Build agent descriptions
-    agent_descs = []
+    workers = []
     for aid, adef in process.agents.items():
         if adef.role == "orchestrator":
             continue
-        schemas_in = ", ".join(adef.input_schemas)
-        schemas_out = ", ".join(adef.output_schemas)
-        agent_descs.append(
-            f"  - {adef.label} ({aid}): {adef.description}\n"
-            f"    Input schema: {schemas_in}\n"
-            f"    Output schema: {schemas_out}"
-        )
+        types = ", ".join(t.replace("-task", "") for t in adef.input_schemas)
+        workers.append(f"  {aid} (type={types}): {adef.description}")
+    roster = "\n".join(workers)
 
-    # Build schema reference
-    schema_refs = []
-    for sname, sdef in process.schemas.items():
-        fields = []
-        for fname, fdef in sdef.fields.items():
-            attrs = ", ".join(f"{k}:{v}" for k, v in fdef.attrs.items())
-            fields.append(f"      [{fname} {attrs}]")
-        schema_refs.append(
-            f"  {sname}:\n" + "\n".join(fields)
-        )
+    return (
+        "You orchestrate sub-agents. Decompose the user's request into one "
+        "[task] DSL message per sub-agent that should run, then stop.\n"
+        "\n"
+        "Sub-agents:\n"
+        f"{roster}\n"
+        "\n"
+        "Task shape (one line, no whitespace between tags):\n"
+        "[task id=<id> type=<type>]"
+        "[goal]<what>[/goal]"
+        "[file read=<path>]"
+        "[spec]<inline structured spec>[/spec]"
+        "[context-ref id=<other-task.artifacts>]"
+        "[/task]\n"
+        "\n"
+        "Use [context-ref id=tN.artifacts] to reference a prior task's outputs "
+        "instead of re-sending files. Sub-agents derive output paths from the "
+        "spec — do not pre-specify them.\n"
+        "\n"
+        "Output ONLY [task] messages. No prose, no markdown fence.\n"
+    )
 
-    agents_block = "\n".join(agent_descs)
-    schemas_block = "\n".join(schema_refs)
 
-    return f"""## ROLE: Main Orchestrator Agent
-
-You orchestrate multi-agent workflows. You speak to the user in natural language
-and communicate with subagents in LLM-DSL format.
-
-### DSL FORMAT
-[tagname key=value]content[/tagname]
-- Single line, no whitespace between tags
-- Leaf tags (no body): [tagname attr=value]
-- Text content: [tagname]text here[/tagname]
-
-### AVAILABLE SUBAGENTS
-{agents_block}
-
-### DSL SCHEMAS
-{schemas_block}
-
-### YOUR WORKFLOW
-
-**Phase 1 — Decompose:**
-When you receive a user request, break it into tasks. For each task, determine
-which subagent should handle it. Then produce a [task] message for each.
-
-**Phase 2 — Dispatch:**
-Output each [task] message. The system will route them to the appropriate subagents.
-
-**Phase 3 — Aggregate:**
-When you receive [result] messages from all subagents, synthesize them into a
-coherent natural language response for the user. Mention what each subagent did,
-any issues found, and what needs attention.
-
-### TASK MESSAGE FORMAT
-[task id=<unique-id> type=<agent-type>]
-[goal]<what to achieve in natural language>[/goal]
-[file read=<path>]  (files the subagent should read)
-[spec]...[/spec]  (structured spec, if applicable)
-[context-ref id=<other-task.artifacts>]  (reference prior results)
-[output-artifact path=<path>]  (expected output files)
-[/task]
-
-### RESPONSE FORMAT
-Respond with ONLY the DSL [task] messages, one per subagent.
-Do NOT include explanations or natural language.
-
-Example:
-[task id=t1 type=code]
-[goal]Add input validation to POST /users endpoint[/goal]
-[file read=src/handlers/user.py]
-[spec]
-[field name=email required=true rule=format:email]
-[field name=name required=true rule=length:max=100]
-[/spec]
-[output-artifact path=src/handlers/user.py]
-[/task]
-"""
+# Per-agent output cheat sheet. Each agent sees only the tags it actually
+# emits — no generic DSL syntax block, no input schema, no foreign tags.
+# Keep in sync with translator expanders in src/translator.py.
+_AGENT_OUTPUT_EXAMPLES: dict[str, str] = {
+    "coder": (
+        "[result id=<task-id> s=ok|partial|fail]"
+        "[artifact a=new|mod|del n=<lines> path=<path>]"
+        "[added fn=<name> in:<type> out:<type>]"
+        "[complexity delta=<+Ncyclomatic>]"
+        "[/result]"
+    ),
+    "reviewer": (
+        "[result id=<task-id> s=ok|partial|fail]"
+        "[note sev=crit|major|minor|info at=<file>:<line>]<finding>[/note]"
+        "[security-check s=pass|fail][note]<detail>[/note][/security-check]"
+        "[style s=pass|fail|warn]"
+        "[verdict approve|request-changes|block]"
+        "[/result]"
+    ),
+    # In [suite], list ONLY failing tests as [test] children; pass count is in
+    # the suite attrs. This keeps suites with many tests cheap.
+    "tester": (
+        "[result id=<task-id> s=ok|partial|fail]"
+        "[artifact a=new n=<lines> path=<path>]"
+        "[suite t=<total> p=<pass> f=<fail>]"
+        "[test name=<name> s=fail reason=<why>]"
+        "[/suite]"
+        "[/result]"
+    ),
+}
 
 
 def build_subagent_prompt(process: ProcessDefinition, agent_id: str) -> str:
-    """Build a subagent's system prompt.
+    """Build a sub-agent's system prompt.
 
-    The subagent needs:
-    1. Its role description
-    2. DSL schema reference for its input/output
-    3. Instructions to respond in DSL format
+    Minimal by design: role line, hard rule, single-line example showing only
+    the tags this agent emits. The task message itself shows the input format.
     """
     adef = process.agents[agent_id]
-
-    # Get input schema details
-    input_schemas = []
-    for sname in adef.input_schemas:
-        if sname in process.schemas:
-            sdef = process.schemas[sname]
-            fields = []
-            for fname, fdef in sdef.fields.items():
-                attrs = ", ".join(f"{k}:{v}" for k, v in fdef.attrs.items())
-                fields.append(f"    [{fname} {attrs}]")
-            input_schemas.append(f"  {sname}:\n" + "\n".join(fields))
-
-    # Get output schema details
-    output_schemas = []
-    for sname in adef.output_schemas:
-        if sname in process.schemas:
-            sdef = process.schemas[sname]
-            fields = []
-            for fname, fdef in sdef.fields.items():
-                attrs = ", ".join(f"{k}:{v}" for k, v in fdef.attrs.items())
-                fields.append(f"    [{fname} {attrs}]")
-            output_schemas.append(f"  {sname}:\n" + "\n".join(fields))
-
-    input_block = "\n".join(input_schemas) if input_schemas else "  (see core schema)"
-    output_block = "\n".join(output_schemas) if output_schemas else "  (see core schema)"
-
-    return f"""## ROLE: {adef.label}
-
-{adef.description}
-
-### DSL FORMAT
-[tagname key=value]content[/tagname]
-- Single line, no whitespace between tags
-- Leaf tags (no body): [tagname attr=value]
-- Text content: [tagname]text here[/tagname]
-
-### INPUT SCHEMA (what you receive)
-{input_block}
-
-### OUTPUT SCHEMA (what you produce)
-{output_block}
-
-### RESPONSE FORMAT
-Respond with ONLY a DSL [result] message. Do NOT include natural language.
-
-[result id=<task-id> s=ok|partial|fail|blocked]
-[artifact path=<path> a=new|mod|del n=<N>]
-[added fn=<name> in:<type> out:<type>]
-[removed fn=<name>]
-[suite t=<N> p=<N> f=<N>]
-  [test name=<name> s=pass|fail reason=<if-fail>]
-[/suite]
-[verdict approve|request-changes|block]
-[note sev=crit|major|minor|info at=<file>:<line>]<finding text>[/note]
-[complexity delta=<+Ncyclomatic>]
-[/result]
-"""
+    example = _AGENT_OUTPUT_EXAMPLES.get(
+        agent_id, "[result id=<task-id> s=ok|partial|fail][/result]"
+    )
+    return (
+        f"You are the {adef.label}. {adef.description}\n"
+        f"Emit exactly one [result] DSL message. No prose, no markdown fence, "
+        f"no whitespace between tags.\n"
+        f"Shape: {example}\n"
+    )
 
 
 # ── DSL Extraction ──
@@ -278,6 +276,7 @@ def extract_dsl(text: str, start_tag: str = "[result") -> str:
 
 def run_pipeline(process_path: str, user_input: str,
                  agent: str = "pi", model: str = "",
+                 aggregate: str = "static",
                  verbose: bool = False) -> PipelineResult:
     """Run the full multi-agent pipeline with real LLM calls.
 
@@ -286,6 +285,8 @@ def run_pipeline(process_path: str, user_input: str,
         user_input: Natural language input from user
         agent: CLI agent to use ("pi" or "claude")
         model: Model name (optional)
+        aggregate: "static" uses src.translator (free, deterministic).
+                   "llm" calls the main agent to synthesize the summary.
         verbose: Print intermediate outputs
 
     Returns:
@@ -323,13 +324,16 @@ def run_pipeline(process_path: str, user_input: str,
         print(main_prompt[:300] + "...")
         print(f"\nUser input: {user_input}")
 
-    raw_output, success = call_agent(
-        main_prompt, user_input, agent=agent, model=model
+    raw_output, success, main_usage = call_agent(
+        main_prompt, user_input, agent=agent,
+        model=main_agent.model or model,
     )
 
     if not success:
         result.errors.append(f"Main agent LLM call failed: {raw_output}")
         return result
+
+    _accumulate_usage(result, main_usage)
 
     if verbose:
         print(f"\nMain agent output:\n{raw_output[:500]}")
@@ -367,96 +371,198 @@ def run_pipeline(process_path: str, user_input: str,
         result.messages.append(msg)
         result.dsl_tokens += msg.tokens
 
-    # ── Phase 2: Dispatch tasks to subagents ──
+    # ── Phase 2: Dispatch tasks to subagents (wave-by-wave concurrent) ──
     if verbose:
         print("\n" + "=" * 60)
         print("PHASE 2: Subagent execution")
         print("=" * 60)
 
+    waves = _dependency_waves(task_messages)
+    if verbose:
+        for i, w in enumerate(waves):
+            print(f"  wave {i}: {', '.join(w)}")
+
     subagent_results: dict[str, str] = {}  # task_id -> DSL result
 
-    for tid, ttext in task_messages.items():
-        parsed = parse_dsl(ttext)
-        agent_type = parsed.get_attr("type", "")
-        task_goal = parsed.child("goal")
-        goal_text = task_goal.text.strip() if task_goal else ""
+    for wave in waves:
+        # Tasks in the same wave have no cross-dependencies, so dispatch
+        # concurrently. Each worker returns a self-contained outcome dict;
+        # we merge into the shared result sequentially after the wave.
+        with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+            outcomes = list(pool.map(
+                lambda tid: _dispatch_subagent(
+                    process, tid, task_messages[tid],
+                    agent=agent, fallback_model=model, verbose=verbose,
+                ),
+                wave,
+            ))
 
-        # Find the agent for this task type
-        target_agent = None
-        for aid, adef in process.agents.items():
-            if adef.role == "worker" and agent_type in adef.input_schemas:
-                target_agent = aid
-                break
+        for outcome in outcomes:
+            if outcome.get("error"):
+                result.errors.append(outcome["error"])
+                continue
+            _accumulate_usage(result, outcome["usage"])
+            subagent_results[outcome["tid"]] = outcome["dsl_result"]
+            result.messages.append(outcome["message"])
+            result.dsl_tokens += outcome["message"].tokens
 
-        if not target_agent:
-            # Fallback: match by schema name containing the type
-            for aid, adef in process.agents.items():
-                if adef.role == "worker":
-                    for sname in adef.input_schemas:
-                        if agent_type in sname:
-                            target_agent = aid
-                            break
-                if target_agent:
-                    break
-
-        if not target_agent:
-            result.errors.append(f"No agent found for task type: {agent_type}")
-            continue
-
-        if verbose:
-            print(f"\nTask {tid} -> {target_agent} (type={agent_type})")
-            print(f"  Goal: {goal_text[:80]}...")
-
-        # Build subagent prompt
-        sub_prompt = build_subagent_prompt(process, target_agent)
-
-        # The subagent receives the task message as its user input
-        sub_output, success = call_agent(
-            sub_prompt, ttext, agent=agent, model=model
-        )
-
-        if not success:
-            result.errors.append(f"Subagent {target_agent} failed: {sub_output}")
-            continue
-
-        # Extract DSL from subagent output
-        dsl_result = extract_dsl(sub_output, "[result")
-
-        if verbose:
-            print(f"  Subagent output:\n{dsl_result[:300]}")
-
-        # Validate the result
-        try:
-            result_parsed = parse_dsl(dsl_result)
-            if verbose:
-                print(f"  Parsed OK: s={result_parsed.get_attr('s', '?')}")
-        except DslParseError as e:
-            result.errors.append(f"Subagent {target_agent} result failed to parse: {e}")
-            if verbose:
-                print(f"  Parse error: {e}")
-            result_parsed = None
-
-        subagent_results[tid] = dsl_result
-
-        msg = PipelineMessage(
-            msg_id=f"{tid}-result",
-            from_agent=target_agent,
-            to_agent="main",
-            raw_text=sub_output,
-            dsl_text=dsl_result,
-            parsed=result_parsed,
-            tokens=count_tokens(dsl_result),
-        )
-        result.messages.append(msg)
-        result.dsl_tokens += msg.tokens
-
-    # ── Phase 3: Main Agent aggregates results → NL ──
+    # ── Phase 3: Aggregate results → NL ──
     if verbose:
         print("\n" + "=" * 60)
-        print("PHASE 3: Aggregation — DSL to NL")
+        print(f"PHASE 3: Aggregation — DSL to NL (mode={aggregate})")
         print("=" * 60)
 
-    # Build aggregation prompt for main agent
+    if aggregate == "static":
+        nl_output = _aggregate_static(result)
+    elif aggregate == "llm":
+        nl_output, llm_ok = _aggregate_llm(
+            result, agent=agent, model=main_agent.model or model,
+        )
+        if not llm_ok:
+            result.errors.append(f"Aggregation LLM call failed: {nl_output}")
+            result.errors.append("Fell back to static aggregation")
+            nl_output = _aggregate_static(result)
+    else:
+        result.errors.append(f"Unknown aggregate mode: {aggregate!r} (using static)")
+        nl_output = _aggregate_static(result)
+
+    result.nl_output = nl_output
+    result.nl_tokens = count_tokens(nl_output)
+    result.total_tokens = result.dsl_tokens + result.nl_tokens
+    result.success = len([m for m in result.messages if m.to_agent == "main"]) > 0
+
+    if verbose:
+        print(f"\nNL Output ({result.nl_tokens} tokens):\n{nl_output}")
+
+    return result
+
+
+def _dispatch_subagent(process: ProcessDefinition, tid: str, ttext: str,
+                       agent: str, fallback_model: str,
+                       verbose: bool = False) -> dict:
+    """Run one sub-agent call. Returns a self-contained outcome dict so the
+    caller can merge into shared state sequentially. Thread-safe: touches
+    no shared state except via the returned dict.
+    """
+    try:
+        parsed = parse_dsl(ttext)
+    except DslParseError as e:
+        return {"tid": tid, "error": f"Task {tid} failed to parse for dispatch: {e}"}
+
+    agent_type = parsed.get_attr("type", "")
+
+    target_agent = None
+    for aid, adef in process.agents.items():
+        if adef.role == "worker" and agent_type in adef.input_schemas:
+            target_agent = aid
+            break
+    if not target_agent:
+        # Fallback: match by schema name containing the type.
+        for aid, adef in process.agents.items():
+            if adef.role == "worker":
+                for sname in adef.input_schemas:
+                    if agent_type in sname:
+                        target_agent = aid
+                        break
+            if target_agent:
+                break
+    if not target_agent:
+        return {"tid": tid, "error": f"No agent found for task type: {agent_type}"}
+
+    if verbose:
+        goal = parsed.child("goal")
+        goal_text = goal.text.strip() if goal else ""
+        print(f"  → {tid} → {target_agent} (type={agent_type}): {goal_text[:80]}")
+
+    sub_prompt = build_subagent_prompt(process, target_agent)
+    sub_adef = process.agents[target_agent]
+
+    sub_output, success, sub_usage = call_agent(
+        sub_prompt, ttext, agent=agent,
+        model=sub_adef.model or fallback_model,
+    )
+    if not success:
+        return {"tid": tid, "error": f"Subagent {target_agent} failed: {sub_output}",
+                "usage": sub_usage}
+
+    dsl_result = extract_dsl(sub_output, "[result")
+    try:
+        result_parsed = parse_dsl(dsl_result)
+    except DslParseError as e:
+        if verbose:
+            print(f"  ✗ {tid} parse error: {e}")
+        result_parsed = None
+
+    msg = PipelineMessage(
+        msg_id=f"{tid}-result",
+        from_agent=target_agent,
+        to_agent="main",
+        raw_text=sub_output,
+        dsl_text=dsl_result,
+        parsed=result_parsed,
+        tokens=count_tokens(dsl_result),
+        usage=sub_usage,
+    )
+    return {
+        "tid": tid,
+        "dsl_result": dsl_result,
+        "message": msg,
+        "usage": sub_usage,
+    }
+
+
+def _dependency_waves(task_messages: dict[str, str]) -> list[list[str]]:
+    """Group tasks into waves; tasks in the same wave have no cross-dependencies.
+
+    Dependencies are derived from [context-ref id=tN.<...>] children — a task
+    that references t1 must run after t1 completes. Returns topological levels;
+    tasks in level k can run concurrently.
+    """
+    deps: dict[str, set[str]] = {tid: set() for tid in task_messages}
+    for tid, ttext in task_messages.items():
+        try:
+            parsed = parse_dsl(ttext)
+        except DslParseError:
+            continue
+        for cref in parsed.children_by_tag("context-ref"):
+            ref_id = cref.get_attr("id", "")
+            base = ref_id.split(".", 1)[0]
+            if base and base in task_messages and base != tid:
+                deps[tid].add(base)
+
+    waves: list[list[str]] = []
+    remaining = {tid: set(d) for tid, d in deps.items()}
+    while remaining:
+        ready = sorted(tid for tid, d in remaining.items() if not d)
+        if not ready:
+            # Cycle or unresolved dep — run everything left as one final wave
+            # rather than dropping work. Caller still sees outputs.
+            waves.append(sorted(remaining.keys()))
+            break
+        waves.append(ready)
+        for tid in ready:
+            remaining.pop(tid)
+        for d in remaining.values():
+            d.difference_update(ready)
+    return waves
+
+
+def _aggregate_static(result: PipelineResult) -> str:
+    """Aggregate sub-agent results into NL using src.translator.
+
+    Free and deterministic — no LLM call. Maps each result message to the
+    NL form for its originating agent, then templates them together.
+    """
+    per_agent_nl: dict[str, str] = {}
+    for r in result.messages:
+        if r.to_agent != "main" or not r.parsed:
+            continue
+        per_agent_nl[r.from_agent] = dsl_to_nl(r.dsl_text, r.from_agent)
+    return aggregate_results(per_agent_nl)
+
+
+def _aggregate_llm(result: PipelineResult, agent: str, model: str) -> tuple[str, bool]:
+    """Aggregate via an LLM call to the main agent."""
     results_text = "\n\n".join(
         f"Result from {r.from_agent} ({r.msg_id}):\n{r.dsl_text}"
         for r in result.messages
@@ -482,33 +588,24 @@ Write a natural language summary for the user covering:
 Be concise but informative. Use bullet points or sections for clarity.
 """
 
-    nl_output, success = call_agent(
+    text, ok, usage = call_agent(
         aggregation_prompt,
         "Please synthesize the subagent results into a user-facing summary.",
         agent=agent,
         model=model,
     )
+    _accumulate_usage(result, usage)
+    return text, ok
 
-    if not success:
-        result.errors.append(f"Aggregation LLM call failed: {nl_output}")
-        # Fallback: use static translator
-        per_agent = {}
-        for r in result.messages:
-            if r.to_agent == "main" and r.parsed:
-                agent_type = r.parsed.get_attr("type", "coder")
-                per_agent[agent_type] = r.dsl_text
-        nl_output = aggregate_results(per_agent)
-        result.errors.append("Fell back to static aggregation")
 
-    result.nl_output = nl_output
-    result.nl_tokens = count_tokens(nl_output)
-    result.total_tokens = result.dsl_tokens + result.nl_tokens
-    result.success = len([m for m in result.messages if m.to_agent == "main"]) > 0
-
-    if verbose:
-        print(f"\nNL Output ({result.nl_tokens} tokens):\n{nl_output}")
-
-    return result
+def _accumulate_usage(result: PipelineResult, usage: dict) -> None:
+    """Roll a single CLI `usage` dict into the result totals."""
+    if not usage:
+        return
+    result.wire_input_tokens += usage.get("input_tokens", 0) or 0
+    result.wire_output_tokens += usage.get("output_tokens", 0) or 0
+    result.wire_cache_read_tokens += usage.get("cache_read_input_tokens", 0) or 0
+    result.wire_cache_creation_tokens += usage.get("cache_creation_input_tokens", 0) or 0
 
 
 def _extract_tasks(text: str) -> dict[str, str]:

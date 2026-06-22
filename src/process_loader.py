@@ -43,6 +43,9 @@ class AgentDef:
     validation: str = "permissive"
     max_retries: int = 3
     context_budget: int = 3000
+    # Optional CLI model override. Empty string means "use run_pipeline's
+    # global --model, or CLI default if that's empty too".
+    model: str = ""
 
 
 @dataclass
@@ -240,6 +243,7 @@ def _load_agents(block: dict[str, Any]) -> dict[str, AgentDef]:
             validation=data.get("validation", "permissive"),
             max_retries=data.get("max-retries", 3),
             context_budget=data.get("context-budget", 3000),
+            model=data.get("model", ""),
         )
         agents[agent_id] = ad
     return agents

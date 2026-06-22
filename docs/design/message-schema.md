@@ -145,9 +145,7 @@ These types are always available and do not need declaration.
 | `[goal]` | text (str) | What to achieve, in NL |
 | `[file]` | file ref | File to read/modify |
 | `[spec]` | structured | Structured specification |
-| `[output-artifact]` | file ref | Expected output files |
 | `[context-ref]` | reference | References prior message data |
-| `[focus]` | key-value | What aspects to focus on |
 | `[test-cases]` | list of cases | Test case descriptions |
 | `[importance]` | float | Priority weight |
 
@@ -326,9 +324,10 @@ Used by `type=code` tasks:
     [on-invalid status=<int> format=<str>]
   [/spec]
   [file read=<path>]
-  [output-artifact path=<path>]
 [/task]
 ```
+
+Output paths are not pre-specified — the coder derives them from the spec and the file being modified.
 
 **`[field]` attributes:** `name`, `required`, `type`, `rule`
 
@@ -344,7 +343,6 @@ Used by `type=review` tasks and results:
 [task id=<id> type=review]
   [goal]...[/goal]
   [context-ref id=<ref>]
-  [focus security=<bool> style=<bool> correctness=<bool>]
 [/task]
 
 [result id=<id> s=ok]
@@ -374,22 +372,23 @@ Used by `type=test` tasks and results:
   [test-cases]
     [case]...[/case]
   [/test-cases]
-  [output-artifact path=<path>]
 [/task]
 
 [result id=<id> s=ok]
   [artifact ...]
   [suite t=<int> p=<int> f=<int>]
-    [test name=<str> s=<enum> reason=<str>]
+    [test name=<str> s=fail reason=<str>]
   [/suite]
 [/result]
 ```
 
+Test-file path is not pre-specified — the tester picks it by convention.
+
 **`[case]`** — Free-form test case description.
 
-**`[test]` attributes:** `name`, `s` (enum: `pass`, `fail`, `skip`, `err`), `reason` (required if `s=fail`)
+**`[test]` attributes:** `name`, `s` (enum: `fail`, `skip`, `err`), `reason` (required if `s=fail`).
 
-**`[suite]` attributes:** `t`, `p`, `f`
+**`[suite]` convention (failures-only):** `[suite]` enumerates **only failing tests** as `[test]` children. Pass counts live in `t=` (total), `p=` (pass), `f=` (fail). Listing passing tests inflates tokens linearly for no diagnostic value.
 
 ---
 
@@ -491,8 +490,6 @@ Full message flow from the validation testcase with schema annotations:
     [field name=age required=false type=int rule=range:0-150]
     [on-invalid status=422 format=standard-error]    ← domain: error config
   [/spec]
-  [output-artifact path=src/handlers/user.py]         ← domain: expected output
-  [output-artifact path=src/validation/user_schema.py]
 [/task]
 ```
 

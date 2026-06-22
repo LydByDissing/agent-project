@@ -38,7 +38,7 @@ Layer 2 only includes the schemas the specific agent needs:
 ```
 # Coder agent Layer 2 — only code-task (input) and code-result (output):
 ## Your Task Schema (input)
-[task type=code] with fields: goal, spec, file, output-artifact
+[task type=code] with fields: goal, spec, file
   spec children: field*, on-invalid
     field attrs: name, required, type, rule
 

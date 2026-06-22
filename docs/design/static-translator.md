@@ -74,8 +74,9 @@ This is **static**. No LLM, no local model. Pure template + rule expansion.
 | `[note sev=S at=P]text[/note]` | "S finding at P: text" |
 | `[suite t=T p=P f=F]` | "P of T tests pass, F fail" |
 | `[test name=N s=fail reason=R]` | "N failed: R" |
-| `[test name=N s=pass]` | (omitted in summary, counted only) |
 | `[error code=C sev=S]` | "Error (C, S)" |
+
+`[suite]` enumerates only failing tests under the failures-only convention — passing tests aren't emitted; the count in `p=` is the source of truth.
 | Passthrough tag `[X]` | "X: [content]" |
 
 ### Template Filling

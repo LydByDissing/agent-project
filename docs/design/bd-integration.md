@@ -36,8 +36,6 @@ User reads DSL summary
 [field name=name required=true rule=length:max=100]
 [field name=age required=false type=int rule=range:0-150]
 [/spec]
-[output-artifact path=src/handlers/user.py]
-[output-artifact path=src/validation/user_schema.py]
 [/task]
 
 ## Acceptance
