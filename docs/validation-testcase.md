@@ -64,8 +64,6 @@ User ◀──NL── Main Agent
     [field name=age required=false type=int rule=range:0-150]
     [on-invalid status=422 format=standard-error]
   [/spec]
-  [output-artifact path=src/handlers/user.py]
-  [output-artifact path=src/validation/user_schema.py]
 [/task]
 ```
 
@@ -75,10 +73,10 @@ User ◀──NL── Main Agent
 [task id=t2 type=review]
   [goal]Review validation code for correctness, security, style[/goal]
   [context-ref id=t1.artifacts]
-  [focus security=true style=true correctness=true]
-  [schema-review]true[/schema-review]
 [/task]
 ```
+
+The reviewer always covers correctness, security, and style — no `[focus]` tag is needed.
 
 ### Message 3: Main Agent → Tester (DSL)
 
@@ -92,21 +90,20 @@ User ◀──NL── Main Agent
     [case]missing name → 422[/case]
     [case]=age 200 → 422[/case]
   [/test-cases]
-  [output-artifact path=tests/test_user_validation.py]
 [/task]
 ```
+
+The tester derives the test-file path from convention — no `[output-artifact]` tag.
 
 ### Message 4: Coder → Main Agent (DSL)
 
 ```dsl
-[result id=t1 status=complete]
-  [artifact type=file path=src/handlers/user.py 
-            action=modified lines=+23]
-  [artifact type=file path=src/validation/user_schema.py 
-            action=created lines=18]
+[result id=t1 s=ok]
+  [artifact a=mod n=+23 path=src/handlers/user.py]
+  [artifact a=new n=18 path=src/validation/user_schema.py]
   [added fn=validate_user_input in:RequestBody 
         out:ValidationResult]
-  [test id=manual status=pass note="smoke tested locally"]
+  [test id=manual note="smoke tested locally" s=pass]
   [complexity delta=+2cyclomatic]
 [/result]
 ```
@@ -114,38 +111,32 @@ User ◀──NL── Main Agent
 ### Message 5: Reviewer → Main Agent (DSL)
 
 ```dsl
-[result id=t2 status=complete]
+[result id=t2 s=ok]
   [verdict approve]
-  [finding severity=minor line=src/handlers/user.py:34]
+  [note at=src/handlers/user.py:34 sev=minor]
     Email regex does not support international domains.
     Consider using a library like email-validator.
-  [/finding]
-  [security-check status=pass]
+  [/note]
+  [security-check s=pass]
     [note]SQL injection not applicable — uses ORM[/note]
   [/security-check]
-  [style status=pass]
+  [style s=pass]
 [/result]
 ```
 
 ### Message 6: Tester → Main Agent (DSL)
 
 ```dsl
-[result id=t3 status=complete]
-  [artifact type=file path=tests/test_user_validation.py 
-            action=created lines=45]
-  [test-suite total=8 pass=7 fail=1]
-    [test name=test_age_boundary_150 status=pass]
-    [test name=test_age_boundary_neg1 status=pass]
-    [test name=test_missing_name status=pass]
-    [test name=test_invalid_email status=pass]
-    [test name=test_valid_full_input status=pass]
-    [test name=test_age_200 status=pass]
-    [test name=test_age_boundary_0 status=pass]
-    [test name=test_sql_injection_name status=fail
-           reason="Input not sanitized — SQL chars pass through"]
-  [/test-suite]
+[result id=t3 s=ok]
+  [artifact a=new n=45 path=tests/test_user_validation.py]
+  [suite t=8 p=7 f=1]
+    [test name=test_sql_injection_name
+           reason="Input not sanitized — SQL chars pass through" s=fail]
+  [/suite]
 [/result]
 ```
+
+`[suite]` enumerates only failing tests — pass counts live in `t=`, `p=`, `f=`. Passing tests aren't listed.
 
 ### Message 7: Main Agent → User (Natural Language)
 

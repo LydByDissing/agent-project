@@ -51,31 +51,32 @@ This is **static**. No LLM, no local model. Pure template + rule expansion.
 
 1. **Parse** the DSL into a structured data tree (tags, attributes, children, text).
 2. **Expand** known tags using static rules:
-   - `[artifact type=file path=X action=modified lines=+N]` → "X (+N lines, modified)"
+   - `[artifact path=X a=mod n=+N]` → "X (+N lines, modified)"
    - `[verdict approve]` → "Approved"
-   - `[test-suite total=T pass=P fail=F]` → "P of T tests pass"
+   - `[suite t=T p=P f=F]` → "P of T tests pass"
 3. **Passthrough** unknown tags with a generic expansion:
-   - `[security-check status=pass]...[/security-check]` → "Security check: Pass. [content]"
+   - `[security-check s=pass]...[/security-check]` → "Security check: Pass. [content]"
 4. **Fill** the output template (from `human-output.md`) with expanded data.
 
 ### Static Expansion Rules
 
 | DSL Construct | NL Expansion |
 |---------------|-------------|
-| `[artifact type=F path=P action=created lines=N]` | "Created P (N lines)" |
-| `[artifact type=F path=P action=modified lines=+N]` | "Modified P (+N lines)" |
-| `[artifact type=F path=P action=deleted]` | "Deleted P" |
+| `[artifact path=P a=new n=N]` | "Created P (N lines)" |
+| `[artifact path=P a=mod n=+N]` | "Modified P (+N lines)" |
+| `[artifact path=P a=del]` | "Deleted P" |
 | `[added fn=F]` | "Added F" |
 | `[added fn=F in:A out:B]` | "Added F(A) → B" |
 | `[removed fn=F]` | "Removed F" |
 | `[verdict approve]` | "Approved" |
 | `[verdict request-changes]` | "Changes requested" |
 | `[verdict block]` | "Blocked" |
-| `[finding severity=S path=P:text]` | "S finding at P: text" |
-| `[test-suite total=T pass=P fail=F]` | "P of T tests pass, F fail" |
-| `[test name=N status=fail reason=R]` | "N failed: R" |
-| `[test name=N status=pass]` | (omitted in summary, counted only) |
-| `[error code=C severity=S]` | "Error (C, S)" |
+| `[note sev=S at=P]text[/note]` | "S finding at P: text" |
+| `[suite t=T p=P f=F]` | "P of T tests pass, F fail" |
+| `[test name=N s=fail reason=R]` | "N failed: R" |
+| `[error code=C sev=S]` | "Error (C, S)" |
+
+`[suite]` enumerates only failing tests under the failures-only convention — passing tests aren't emitted; the count in `p=` is the source of truth.
 | Passthrough tag `[X]` | "X: [content]" |
 
 ### Template Filling
@@ -96,7 +97,7 @@ For the PoC, template filling is simple string concatenation and join — no tem
 Common expansions can be cached. The cache key is the DSL wire form of the tag. For example:
 
 ```
-Input:  [artifact type=file path=src/handlers/user.py action=modified lines=+23]
+Input:  [artifact a=mod n=+23 path=src/handlers/user.py]
 Cache:  "Modified src/handlers/user.py (+23 lines)"
 ```
 

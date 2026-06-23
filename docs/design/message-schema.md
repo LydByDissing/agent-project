@@ -32,6 +32,46 @@ This form is chosen because:
 - It's more compact than JSON/XML for the semantic content we encode
 - Attributes compress named fields without keys-as-tokens overhead
 
+### 1.1 Canonical Compact Dialect
+
+The wire form uses short attribute names and short enum values. This is the only blessed dialect — long forms (`status=complete`, `action=modified`, etc.) are not accepted.
+
+**Universal attrs:**
+
+| Attr | On | Values |
+|------|----|--------|
+| `s=` | `[result]`, `[test]`, `[security-check]`, `[style]` | `ok`, `partial`, `fail`, `blocked`, `pass`, `skip`, `err` |
+| `a=` | `[artifact]` | `new`, `mod`, `del` |
+| `n=` | `[artifact]` | line count, optionally signed (`+23`, `-4`, `18`) |
+| `sev=` | `[note]` | `crit`, `major`, `minor`, `info` |
+| `at=` | `[note]`, `[non-goal]` | `<file>` or `<file>:<line>` — a *location*, not a file under work |
+| `t=`, `p=`, `f=` | `[suite]` | total / pass / fail counts |
+| `id=`, `type=`, `ref=`, `req=`, `path=`, `fn=`, `name=`, `in=`, `out=` | various | unchanged — already short or semantically load-bearing |
+
+**Note on `status=`:** `status=` is still allowed *only* for HTTP response codes (e.g., `[on-invalid status=422 format=standard-error]`), since that's a different field semantic from workflow state. Anywhere else, use `s=`.
+
+**Tag merges/renames vs. earlier drafts:**
+
+| Earlier | Canonical | Notes |
+|---------|-----------|-------|
+| `[test-suite]` | `[suite]` | |
+| `[finding severity=... path=...]` | `[note sev=... at=...]` | Findings are notes with severity. Bare `[note]` (no `sev=`) remains free-form. |
+| `[invariant]` | `[inv]` | Matches the compact discipline. |
+
+**Enum compaction reference:**
+
+| Long | Compact |
+|------|---------|
+| `complete` | `ok` |
+| `failed` | `fail` |
+| `created` | `new` |
+| `modified` | `mod` |
+| `deleted` | `del` |
+| `error` | `err` |
+| `critical` | `crit` |
+
+`partial`, `blocked`, `pass`, `skip`, `major`, `minor`, `info`, `approve`, `request-changes`, `block` are already short and unchanged.
+
 ---
 
 ## 2. Type System
@@ -105,16 +145,14 @@ These types are always available and do not need declaration.
 | `[goal]` | text (str) | What to achieve, in NL |
 | `[file]` | file ref | File to read/modify |
 | `[spec]` | structured | Structured specification |
-| `[output-artifact]` | file ref | Expected output files |
 | `[context-ref]` | reference | References prior message data |
-| `[focus]` | key-value | What aspects to focus on |
 | `[test-cases]` | list of cases | Test case descriptions |
 | `[importance]` | float | Priority weight |
 
 ### 3.2 `[result]` — Work completion from subagent to orchestrator
 
 ```
-[result id=<id> status=<enum>]
+[result id=<id> s=<enum>]
   ...
 [/result]
 ```
@@ -123,7 +161,7 @@ These types are always available and do not need declaration.
 | Attr | Type | Required | Description |
 |------|------|----------|-------------|
 | `id` | `id` | yes | Matches the `[task id=...]` this responds to |
-| `status` | `enum` | yes | `complete`, `partial`, `failed`, `blocked` |
+| `s` | `enum` | yes | `ok`, `partial`, `fail`, `blocked` |
 
 **Common child tags:**
 
@@ -131,26 +169,25 @@ These types are always available and do not need declaration.
 |-----|------|-------------|
 | `[artifact]` | structured | Produced/modified files |
 | `[verdict]` | enum | `approve`, `request-changes`, `block` |
-| `[finding]` | structured | Issues found |
-| `[test-suite]` | structured | Test results |
+| `[note]` | structured | Free-form text, or a review finding when `sev=` is set |
+| `[suite]` | structured | Test results |
 | `[added]` | structured | Things added |
 | `[removed]` | structured | Things removed |
-| `[error]` | structured | Error details if status=failed |
-| `[note]` | text (str) | Free-form notes |
+| `[error]` | structured | Error details if `s=fail` |
 
 ### 3.3 `[artifact]` — Produced or modified file
 
 ```
-[artifact type=file path=<path> action=<enum> lines=<int>]
+[artifact path=<path> a=<enum> n=<int>]
 ```
 
 **Attributes:**
 | Attr | Type | Required | Description |
 |------|------|----------|-------------|
-| `type` | `enum` | yes | `file`, `config`, `schema` |
 | `path` | `path` | yes | File path, optionally with `:line` |
-| `action` | `enum` | yes | `created`, `modified`, `deleted` |
-| `lines` | `int` | no | Lines added (with `+`/`-` prefix) or total |
+| `a` | `enum` | yes | `new`, `mod`, `del` |
+| `n` | `int` | no | Lines added (with `+`/`-` prefix) or total |
+| `type` | `enum` | no | `file` (default), `config`, `schema` |
 | `hash` | `str` | no | Content hash for integrity |
 
 ### 3.4 `[context-ref]` — Reference to prior message data
@@ -207,6 +244,67 @@ Records what was added or removed from the codebase. More compact than diffs, mo
 | `out` | `str` | no | Output type signature |
 | `path` | `path` | no | Where it lives |
 
+### 3.8 `[origin]` — File provenance header (embedded in source)
+
+Embedded at the top of source files generated by coder workers, as a comment block. The host language's comment prefix (`#`, `//`, `--`) is stripped before applying DSL grammar; everything else is standard DSL.
+
+```
+[origin ref=<bd-id>[,<bd-id>...] req=<req-id> c4=<container/component>]
+  [intent]<one sentence — why this file exists>[/intent]
+  [inv]<falsifiable claim that must hold>[/inv]
+  [exposes fn=<name> in:<type> out:<type>]
+  [non-goal at=<path>]<thing this file deliberately omits>[/non-goal]
+[/origin]
+```
+
+**Attributes:**
+| Attr | Type | Required | Description |
+|------|------|----------|-------------|
+| `ref` | list of `id` | yes | bd issue ids that authored or modified this file, **newest first**, comma-separated. Reader takes `split(',')[0]` for the current bd issue. |
+| `req` | `str` | yes | Requirement id (e.g. `REQ-42`), or `orphan` |
+| `c4` | `str` | no* | Architecture position, `container/component`. *Required once the project declares C4 coverage. |
+
+**Child tags:**
+| Tag | Card | Description |
+|-----|------|-------------|
+| `[intent]` | 1 | One sentence — why the file exists. Lets reviewers judge goal-vs-implementation. |
+| `[inv]` | 0..N | Falsifiable claim; reviewers attempt to refute |
+| `[exposes]` | 0..N | Public surface (same shape as `[added]`) |
+| `[non-goal]` | 0..N | Explicitly out of scope; `at=` points at the file/component that owns it |
+
+**Update rule:** when a coder worker materially modifies an existing file, it prepends its own bd id to the `ref=` list. Older provenance stays in the list — git blame and `bd dep` provide the deeper chain.
+
+**Scope:** emitted on every source and test file a coder worker creates or materially modifies. Skipped on pure config (`.toml`, `.json`, fixtures), lockfiles, and generated build output.
+
+#### Example (Python, pretty form)
+
+```python
+# [origin ref=llm-dsl-1567,llm-dsl-1234 req=REQ-42 c4=api/auth-service]
+#   [intent]Verify JWT tokens against rotating signing keys[/intent]
+#   [inv]tokens older than 24h are rejected[/inv]
+#   [inv]signing keys never logged[/inv]
+#   [exposes fn=verify_token in:str out:Claims]
+#   [non-goal at=src/token_issuer.py]token issuance[/non-goal]
+# [/origin]
+```
+
+#### Example (TypeScript, wire form)
+
+```typescript
+// [origin ref=llm-dsl-1234 req=REQ-42][intent]Verify JWT tokens against rotating signing keys[/intent][inv]tokens older than 24h rejected[/inv][exposes fn=verifyToken in:string out:Claims][/origin]
+```
+
+#### Comment-prefix handling
+
+The parser strips the leading per-language comment marker before applying DSL grammar:
+
+| Language | Prefix |
+|----------|--------|
+| Python, shell, YAML, TOML | `# ` |
+| JS, TS, Go, Rust, Java, C, C++ | `// ` |
+| SQL, Lua, Haskell | `-- ` |
+| HTML, XML | `<!--` / `-->` (wraps the whole block) |
+
 ---
 
 ## 4. Domain Schemas (Agent-Type Specific)
@@ -226,9 +324,10 @@ Used by `type=code` tasks:
     [on-invalid status=<int> format=<str>]
   [/spec]
   [file read=<path>]
-  [output-artifact path=<path>]
 [/task]
 ```
+
+Output paths are not pre-specified — the coder derives them from the spec and the file being modified.
 
 **`[field]` attributes:** `name`, `required`, `type`, `rule`
 
@@ -244,22 +343,21 @@ Used by `type=review` tasks and results:
 [task id=<id> type=review]
   [goal]...[/goal]
   [context-ref id=<ref>]
-  [focus security=<bool> style=<bool> correctness=<bool>]
 [/task]
 
-[result id=<id> status=complete]
+[result id=<id> s=ok]
   [verdict approve|request-changes|block]
-  [finding severity=<enum> path=<path>:<int>]
+  [note sev=<enum> at=<path>:<int>]
     free-form text
-  [/finding]
-  [security-check status=<enum>]
+  [/note]
+  [security-check s=<enum>]
     [note]...[/note]
   [/security-check]
-  [style status=<enum>]
+  [style s=<enum>]
 [/result]
 ```
 
-**`[finding]` attributes:** `severity` (enum: `critical`, `major`, `minor`, `info`), `path` (with line)
+**`[note]` attributes (when used as a finding):** `sev` (enum: `crit`, `major`, `minor`, `info`), `at` (file path with optional `:line`). A bare `[note]` with no `sev=` is just free-form text.
 
 **Note: `[security-check]` is a schema-drift example** — it's not in the core schema, and the main agent must passthrough it without understanding it.
 
@@ -274,22 +372,23 @@ Used by `type=test` tasks and results:
   [test-cases]
     [case]...[/case]
   [/test-cases]
-  [output-artifact path=<path>]
 [/task]
 
-[result id=<id> status=complete]
+[result id=<id> s=ok]
   [artifact ...]
-  [test-suite total=<int> pass=<int> fail=<int>]
-    [test name=<str> status=<enum> reason=<str>]
-  [/test-suite]
+  [suite t=<int> p=<int> f=<int>]
+    [test name=<str> s=fail reason=<str>]
+  [/suite]
 [/result]
 ```
 
+Test-file path is not pre-specified — the tester picks it by convention.
+
 **`[case]`** — Free-form test case description.
 
-**`[test]` attributes:** `name`, `status` (enum: `pass`, `fail`, `skip`, `error`), `reason` (required if status=fail)
+**`[test]` attributes:** `name`, `s` (enum: `fail`, `skip`, `err`), `reason` (required if `s=fail`).
 
-**`[test-suite]` attributes:** `total`, `pass`, `fail`
+**`[suite]` convention (failures-only):** `[suite]` enumerates **only failing tests** as `[test]` children. Pass counts live in `t=` (total), `p=` (pass), `f=` (fail). Listing passing tests inflates tokens linearly for no diagnostic value.
 
 ---
 
@@ -330,13 +429,14 @@ For deterministic output:
 ### Example: Compact (wire) Form
 
 ```
-[task id=t1 type=code][goal]Add input validation to POST /users endpoint[/goal][file read=src/handlers/user.py][spec][field name=email required=true rule=format:email][field name=name required=true rule=length:max=100][/spec][/task]
+[task id=t1 type=code][req id=REQ-42][goal]Add input validation to POST /users endpoint[/goal][file read=src/handlers/user.py][spec][field name=email required=true rule=format:email][field name=name required=true rule=length:max=100][/spec][/task]
 ```
 
 ### Example: Pretty (debug/display) Form
 
 ```
 [task id=t1 type=code]
+  [req id=REQ-42]
   [goal]Add input validation to POST /users endpoint[/goal]
   [file read=src/handlers/user.py]
   [spec]
@@ -381,6 +481,7 @@ Full message flow from the validation testcase with schema annotations:
 
 ```
 [task id=t1 type=code]                               ← core: task
+  [req id=REQ-42]                                     ← core: requirement
   [goal]Add input validation to POST /users endpoint[/goal]  ← core: goal (text)
   [file read=src/handlers/user.py]                    ← core: file (read ref)
   [spec]                                              ← domain: code spec
@@ -389,22 +490,18 @@ Full message flow from the validation testcase with schema annotations:
     [field name=age required=false type=int rule=range:0-150]
     [on-invalid status=422 format=standard-error]    ← domain: error config
   [/spec]
-  [output-artifact path=src/handlers/user.py]         ← domain: expected output
-  [output-artifact path=src/validation/user_schema.py]
 [/task]
 ```
 
 ### M4: Result (code)
 
 ```
-[result id=t1 status=complete]                        ← core: result
-  [artifact type=file path=src/handlers/user.py       ← core: artifact
-            action=modified lines=+23]
-  [artifact type=file path=src/validation/user_schema.py
-            action=created lines=18]
-  [added fn=validate_user_input in:RequestBody        ← core: added
+[result id=t1 s=ok]                                  ← core: result
+  [artifact path=src/handlers/user.py a=mod n=+23]   ← core: artifact
+  [artifact path=src/validation/user_schema.py a=new n=18]
+  [added fn=validate_user_input in:RequestBody       ← core: added
         out:ValidationResult]
-  [test id=manual status=pass]                       ← domain: coder test
+  [test id=manual s=pass]                            ← domain: coder test
   [complexity delta=+2cyclomatic]                    ← domain: complexity metric
 [/result]
 ```
@@ -412,16 +509,16 @@ Full message flow from the validation testcase with schema annotations:
 ### M5: Result (review) — with schema drift
 
 ```
-[result id=t2 status=complete]
+[result id=t2 s=ok]
   [verdict approve]                                   ← domain: review
-  [finding severity=minor path=src/handlers/user.py:34] ← domain: review
+  [note sev=minor at=src/handlers/user.py:34]        ← domain: review finding
     Email regex does not support international domains.
     Consider using a library like email-validator.
-  [/finding]
-  [security-check status=pass]                        ← UNKNOWN (passthrough!)
+  [/note]
+  [security-check s=pass]                             ← UNKNOWN (passthrough!)
     [note]SQL injection not applicable — uses ORM[/note]
   [/security-check]
-  [style status=pass]                                 ← domain: review
+  [style s=pass]                                      ← domain: review
 [/result]
 ```
 

@@ -67,39 +67,34 @@ class RunResult:
 
 SIMULATED_RESPONSES: dict[str, str] = {
     "t1": (
-        '[result id=t1 status=complete]'
-        '[artifact action=created lines=18 path=src/validation/user_schema.py type=file]'
-        '[artifact action=modified lines="+23" path=src/handlers/user.py type=file]'
+        '[result id=t1 s=ok]'
+        '[artifact a=new n=18 path=src/validation/user_schema.py]'
+        '[artifact a=mod n="+23" path=src/handlers/user.py]'
         '[added fn=validate_user_input in:RequestBody out:ValidationResult]'
         '[complexity delta="+2cyclomatic"]'
         '[/result]'
     ),
     "t2": (
-        '[result id=t2 status=complete]'
-        '[finding path=src/handlers/user.py:34 severity=minor]'
+        '[result id=t2 s=ok]'
+        '[note at=src/handlers/user.py:34 sev=minor]'
         'Email regex does not support international domains. '
         'Consider using a library like email-validator.'
-        '[/finding]'
-        '[security-check status=pass]'
+        '[/note]'
+        '[security-check s=pass]'
         '[note]SQL injection not applicable — uses ORM[/note]'
         '[/security-check]'
-        '[style status=pass]'
+        '[style s=pass]'
         '[verdict approve]'
         '[/result]'
     ),
+    # Failures-only convention: enumerate only [test] children that failed.
+    # Pass counts live in [suite t=N p=N f=N]; passing tests don't take tokens.
     "t3": (
-        '[result id=t3 status=complete]'
-        '[artifact action=created lines=45 path=tests/test_user_validation.py type=file]'
-        '[test-suite fail=1 pass=7 total=8]'
-        '[test name=test_age_boundary_0 status=pass]'
-        '[test name=test_age_boundary_150 status=pass]'
-        '[test name=test_age_boundary_neg1 status=pass]'
-        '[test name=test_age_200 status=pass]'
-        '[test name=test_invalid_email status=pass]'
-        '[test name=test_missing_name status=pass]'
-        '[test name=test_valid_full_input status=pass]'
-        '[test name=test_sql_injection_name reason="Input not sanitized — SQL chars pass through" status=fail]'
-        '[/test-suite]'
+        '[result id=t3 s=ok]'
+        '[artifact a=new n=45 path=tests/test_user_validation.py]'
+        '[suite t=8 p=7 f=1]'
+        '[test name=test_sql_injection_name reason="Input not sanitized — SQL chars pass through" s=fail]'
+        '[/suite]'
         '[/result]'
     ),
 }
@@ -112,7 +107,12 @@ def _count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
 
 
 def _build_coder_task() -> str:
-    """Build the M1 task message (Main -> Coder)."""
+    """Build the M1 task message (Main -> Coder).
+
+    Output paths are NOT pre-specified: the coder derives them from the
+    spec + the file being modified. Saves tokens and matches how real
+    coder agents already operate.
+    """
     return (
         '[task id=t1 type=code]'
         '[goal]Add input validation to POST /users endpoint[/goal]'
@@ -123,25 +123,29 @@ def _build_coder_task() -> str:
         '[field name=age required=false type=int rule=range:0-150]'
         '[on-invalid format=standard-error status=422]'
         '[/spec]'
-        '[output-artifact path=src/handlers/user.py]'
-        '[output-artifact path=src/validation/user_schema.py]'
         '[/task]'
     )
 
 
 def _build_reviewer_task() -> str:
-    """Build the M2 task message (Main -> Reviewer)."""
+    """Build the M2 task message (Main -> Reviewer).
+
+    No [focus] — the reviewer always covers correctness, security, and style.
+    Re-introduce only if a future caller needs partial coverage.
+    """
     return (
         '[task id=t2 type=review]'
         '[goal]Review validation code for correctness, security, style[/goal]'
         '[context-ref id=t1.artifacts]'
-        '[focus correctness=true security=true style=true]'
         '[/task]'
     )
 
 
 def _build_tester_task() -> str:
-    """Build the M3 task message (Main -> Tester)."""
+    """Build the M3 task message (Main -> Tester).
+
+    Test-file path is implicit (tester decides based on convention).
+    """
     return (
         '[task id=t3 type=test]'
         '[goal]Write and run tests for user input validation[/goal]'
@@ -152,7 +156,6 @@ def _build_tester_task() -> str:
         '[case]missing name -> 422[/case]'
         '[case]age 200 -> 422[/case]'
         '[/test-cases]'
-        '[output-artifact path=tests/test_user_validation.py]'
         '[/task]'
     )
 

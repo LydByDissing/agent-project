@@ -42,9 +42,21 @@ Run all shell commands from this directory.
 
 2. Do the work described in [goal], staying within the scope of this issue only.
 
-3. Verify your work meets every acceptance criterion before writing the result.
+3. Coder/tester only: emit an [origin] header at the top of every source or test file you create or materially modify.
+   - On new files: write [origin] as a comment block with ref=<bd_id>, req=<REQ from task>, [intent] one sentence from [goal]. Add [inv] / [exposes] / [non-goal] when meaningful.
+   - On existing files with an [origin] header: prepend <bd_id> to the existing ref= list (newest first, comma-separated). Update [intent] only if the change materially shifts purpose.
+   - Skip on: pure config files (.toml, .json, fixtures), lockfiles, generated build output, and files you only deleted.
+   - Comment prefix: # for Python/shell/YAML/TOML, // for JS/TS/Go/Rust/Java/C/C++, -- for SQL/Lua/Haskell.
 
-4. Write result:
+   Example (Python):
+   # [origin ref=<bd_id> req=REQ-XXX c4=<container/component>]
+   #   [intent]<one sentence>[/intent]
+   #   [inv]<falsifiable claim>[/inv]
+   # [/origin]
+
+4. Verify your work meets every acceptance criterion before writing the result.
+
+5. Write result:
    bd update <bd_id> --body-file - << 'DSL'
    [result id=<task_id> s=ok|partial|fail|blocked]
    [artifact path=<path> a=new|mod|del n=<lines>]
@@ -54,7 +66,7 @@ Run all shell commands from this directory.
    [/result]
    DSL
 
-5. Close: bd close <bd_id>
+6. Close: bd close <bd_id>
 
 Rules:
 - Do NOT create additional bd issues

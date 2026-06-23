@@ -50,15 +50,15 @@ Rules:
 - Attributes: key=value (bare) or key="value with spaces" (quoted)
 - Leaf tags (no body, no close tag): [tagname attr=value]
 - Text content: [tagname]text here[/tagname]
-- Enum values: lowercase
+- Enum values: lowercase, short form (ok, mod, new, crit, ...)
 
 ### Core Response Tags
 
-[result id=<task-id> status=complete|partial|failed|blocked]
+[result id=<task-id> s=ok|partial|fail|blocked]
   Your response wrapper. Always use this.
 
-[artifact type=file path=<path> action=created|modified|deleted lines=<N>]
-  File changes. Leaf tag.
+[artifact path=<path> a=new|mod|del n=<N>]
+  File changes. Leaf tag. `a` = action, `n` = line count.
 
 [added fn=<name> in:<input-type> out:<output-type>]
   Functions/types added. Leaf tag. Note: in: and out: use colon.
@@ -66,45 +66,46 @@ Rules:
 [removed fn=<name>]
   Functions/types removed. Leaf tag.
 
-[test-suite total=<N> pass=<N> fail=<N>]
-  [test name=<name> status=pass|fail|skip reason=<if-fail>]
-  Test results.
+[suite t=<N> p=<N> f=<N>]
+  [test name=<name> s=pass|fail|skip reason=<if-fail>]
+  Test results. `t`/`p`/`f` = total/pass/fail counts.
 
 [verdict approve|request-changes|block]
   Review verdict. Text value, leaf-like: [verdict approve]
 
-[finding severity=critical|major|minor|info path=<file>:<line>]
+[note sev=crit|major|minor|info at=<file>:<line>]
   Issue description here
-  [/finding]
+  [/note]
+  Review findings use [note] with sev= and at=. A bare [note] with no sev= is free-form text.
 
 ### Example: Coder Response
 
-[result id=t1 status=complete]
-[artifact type=file path=src/validator.py action=created lines=45]
-[artifact type=file path=src/handlers/user.py action=modified lines=+12]
+[result id=t1 s=ok]
+[artifact a=new n=45 path=src/validator.py]
+[artifact a=mod n=+12 path=src/handlers/user.py]
 [added fn=validate_user_input in:RequestBody out:ValidationResult]
 [complexity delta="+3cyclomatic"]
 [/result]
 
 ### Example: Reviewer Response
 
-[result id=t2 status=complete]
+[result id=t2 s=ok]
 [verdict approve]
-[finding severity=minor path=src/auth.py:23]
+[note at=src/auth.py:23 sev=minor]
 Use bcrypt instead of MD5 for password hashing.
-[/finding]
+[/note]
 [/result]
 
 ### Example: Tester Response
 
-[result id=t3 status=complete]
-[artifact type=file path=tests/test_cart.py action=created lines=60]
-[test-suite total=14 pass=12 fail=2]
-[test name=test_add_item status=pass]
-[test name=test_remove_item status=pass]
-[test name=test_oversized_item status=fail reason="weight limit not enforced"]
-[test name=test_concurrency_race status=fail reason="race condition in update"]
-[/test-suite]
+[result id=t3 s=ok]
+[artifact a=new n=60 path=tests/test_cart.py]
+[suite f=2 p=12 t=14]
+[test name=test_add_item s=pass]
+[test name=test_remove_item s=pass]
+[test name=test_oversized_item reason="weight limit not enforced" s=fail]
+[test name=test_concurrency_race reason="race condition in update" s=fail]
+[/suite]
 [/result]
 
 Respond with ONLY the DSL message. No explanation, no markdown code fences.
@@ -125,7 +126,7 @@ TEST_TASKS = [
             "Report your results in DSL format."
         ),
         "expected_tags": ["result", "artifact", "added"],
-        "expected_status": "complete",
+        "expected_status": "ok",
     },
     {
         "id": "review-task-1",
@@ -137,8 +138,8 @@ TEST_TASKS = [
             "Style is good. Approve with minor findings. "
             "Report your review in DSL format."
         ),
-        "expected_tags": ["result", "verdict", "finding"],
-        "expected_status": "complete",
+        "expected_tags": ["result", "verdict", "note"],
+        "expected_status": "ok",
     },
     {
         "id": "test-task-1",
@@ -152,8 +153,8 @@ TEST_TASKS = [
             "(race condition in cart update). "
             "Report results in DSL format."
         ),
-        "expected_tags": ["result", "artifact", "test-suite", "test"],
-        "expected_status": "complete",
+        "expected_tags": ["result", "artifact", "suite", "test"],
+        "expected_status": "ok",
     },
     {
         "id": "error-task-1",
@@ -166,7 +167,7 @@ TEST_TASKS = [
             "Report in DSL format."
         ),
         "expected_tags": ["result"],
-        "expected_status": "failed",
+        "expected_status": "fail",
     },
     {
         "id": "minimal-task-1",
@@ -178,7 +179,7 @@ TEST_TASKS = [
             "Report in DSL format."
         ),
         "expected_tags": ["result", "artifact"],
-        "expected_status": "complete",
+        "expected_status": "ok",
     },
 ]
 
@@ -301,12 +302,12 @@ def validate_output(raw_output: str, test_case: dict, verbose: bool = False) -> 
 
         # Check expected status
         if "expected_status" in test_case:
-            status = parsed.get_attr("status", "")
+            status = parsed.get_attr("s", "")
             if status == test_case["expected_status"]:
-                result["expected_tags_found"].append(f"status={status}")
+                result["expected_tags_found"].append(f"s={status}")
             else:
                 result["expected_tags_missing"].append(
-                    f"status={test_case['expected_status']} (got '{status}')"
+                    f"s={test_case['expected_status']} (got '{status}')"
                 )
 
         # NL expansion

@@ -7,7 +7,7 @@ version: "1.0"
 schemas:
   code-task:
     extends: core
-    description: "Coder task schema"
+    description: "Coder task schema (output paths implicit — agent derives from spec)"
     fields:
       spec:
         type: structured
@@ -15,9 +15,6 @@ schemas:
           field:
             type: repeated
             attrs: {name: str, required: bool, type: str, rule: str}
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
 
   review-task:
     extends: core
@@ -48,17 +45,17 @@ schemas:
 
   test-task:
     extends: core
-    description: "Tester task schema"
+    description: "Tester task schema (test-file path implicit — by convention)"
     fields:
       test-cases:
         type: list-of-text
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
 
   test-result:
     extends: core
-    description: "Tester result schema"
+    # Convention: [suite] enumerates ONLY failing tests as [test] children.
+    # Pass count lives in suite.p; listing passes inflates tokens linearly
+    # in test count for no diagnostic value.
+    description: "Tester result schema (failures-only)"
     fields:
       test-suite:
         type: structured
@@ -67,7 +64,7 @@ schemas:
           test:
             type: repeated
             attrs: {name: str, status: enum, reason: str}
-            status: {values: [pass, fail, skip, error]}
+            status: {values: [fail, skip, error]}
 
 agents:
   main:
@@ -87,6 +84,8 @@ agents:
     label: "Coder"
     description: "Implements code changes from specifications."
     system-prompt: prompts/coder.md
+    # Sonnet — real code generation needs reasoning headroom.
+    model: claude-sonnet-4-6
     schema:
       input: code-task
       output: code-result
@@ -99,6 +98,8 @@ agents:
     label: "Code Reviewer"
     description: "Reviews code for correctness, security, and style."
     system-prompt: prompts/reviewer.md
+    # Haiku — mechanical DSL→DSL review transform.
+    model: claude-haiku-4-5
     schema:
       input: review-task
       output: review-result
@@ -111,6 +112,9 @@ agents:
     label: "Tester"
     description: "Writes and runs tests for code changes."
     system-prompt: prompts/tester.md
+    # Haiku — boilerplate test generation + structured suite output.
+    # Bump to Sonnet if test-case coverage suffers in practice.
+    model: claude-haiku-4-5
     schema:
       input: test-task
       output: test-result

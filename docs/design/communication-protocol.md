@@ -183,7 +183,7 @@ The main agent either:
 #### `[error]` — Structured error reporting
 
 ```
-[error id=<task-id> code=<enum> severity=<enum>]
+[error id=<task-id> code=<enum> sev=<enum>]
   [detail]<machine-readable error detail[/detail]
   [recovery]<suggested recovery action[/recovery]
 [/error]
@@ -194,7 +194,7 @@ The main agent either:
 |------|------|----------|-------------|
 | `id` | `id` | yes | Task this relates to |
 | `code` | `enum` | yes | Error code (see §5) |
-| `severity` | `enum` | yes | `transient`, `permanent`, `unknown` |
+| `sev` | `enum` | yes | `transient`, `permanent`, `unknown` |
 
 ---
 
@@ -210,9 +210,9 @@ Main Agent
     ├──[task id=t2 type=review]────────────▶ Reviewer
     └──[task id=t3 type=test]─────────────▶ Tester
     
-    ├──◀──[result id=t1 status=complete]──── Coder
-    ├──◀──[result id=t2 status=complete]──── Reviewer
-    └──◀──[result id=t3 status=complete]──── Tester
+    ├──◀──[result id=t1 s=ok]──── Coder
+    ├──◀──[result id=t2 s=ok]──── Reviewer
+    └──◀──[result id=t3 s=ok]──── Tester
 ```
 
 Rules:
@@ -305,13 +305,13 @@ The retry policy is **not** expressed in the DSL. It's a protocol-level concern 
 
 ### 5.3 Error Propagation Rules
 
-1. A `[result status=failed]` is **not** an error — it's a valid result. The main agent reads the error details and decides.
+1. A `[result s=fail]` is **not** an error — it's a valid result. The main agent reads the error details and decides.
 2. An `[error]` message is for **infrastructure-level** failures (the subagent could not even produce a result).
 3. The main agent **never** propagates raw error details to the user. It translates errors into NL.
 
 ```
 # Internal (DSL):
-[error code=tool-failure severity=transient]
+[error code=tool-failure sev=transient]
   [detail]File write permission denied: /src/handler.py[/detail]
   [recovery]Retry with elevated permissions[/recovery]
 [/error]
@@ -347,11 +347,11 @@ When the main agent's context approaches a threshold, it summarizes prior DSL me
 
 ```
 # Original result (detailed):
-[result id=t1 status=complete]
-  [artifact type=file path=src/handlers/user.py action=modified lines=+23]
-  [artifact type=file path=src/validation/user_schema.py action=created lines=18]
+[result id=t1 s=ok]
+  [artifact a=mod n=+23 path=src/handlers/user.py]
+  [artifact a=new n=18 path=src/validation/user_schema.py]
   [added fn=validate_user_input in:RequestBody out:ValidationResult]
-  [test id=manual status=pass]
+  [test id=manual s=pass]
   [complexity delta=+2cyclomatic]
 [/result]
 
@@ -409,10 +409,10 @@ STATE: DISPATCHING
 │   Note: t2 and t3 are blocked until t1 completes (dependency)
 │
 STATE: AWAITING
-├── Receive [result id=t1 status=complete] from Coder   (M4)
+├── Receive [result id=t1 s=ok] from Coder   (M4)
 │   └── Now t2 and t3 can resolve their context-ref → unblock
-├── Receive [result id=t2 status=complete] from Reviewer (M5)
-├── Receive [result id=t3 status=complete] from Tester  (M6)
+├── Receive [result id=t2 s=ok] from Reviewer (M5)
+├── Receive [result id=t3 s=ok] from Tester  (M6)
 │   └── All results received → transition to AGGREGATING
 │
 STATE: AGGREGATING
@@ -481,11 +481,11 @@ Messages with the same `id` and identical content are idempotent. Subagents MUST
 | Type | Dir | Attrs | Description |
 |------|-----|-------|-------------|
 | `task` | M→S | `id`, `type` | Assign work |
-| `result` | S→M | `id`, `status` | Report completion |
+| `result` | S→M | `id`, `s` | Report completion |
 | `cancel` | M→S | `id`, `reason` | Cancel task |
 | `ask` | S→M | `id`, `question` | Clarification request |
 | `progress` | S→M | `id`, `pct` | Heartbeat (optional PoC) |
-| `error` | S→M | `id`, `code`, `severity` | Infrastructure failure |
+| `error` | S→M | `id`, `code`, `sev` | Infrastructure failure |
 | `answer` | M→S | `id` | Response to `ask` |
 | `proceed` | M→S | `id` | Tell subagent to continue |
 | `summary` | M→M | `refs` | Self-summarize for context mgmt |
@@ -504,10 +504,10 @@ Keeps the protocol simple. Every subagent is stateless with respect to other sub
 - Circular dependencies
 - Fan-out explosion of connections
 
-### Why separate `[error]` from `[result status=failed]`?
+### Why separate `[error]` from `[result s=fail]`?
 
-`[result status=failed]` means "I tried the task and couldn't complete it" — the subagent did its best. `[error]` means "something broke at the infrastructure level" — the subagent couldn't even attempt the task. The retry policy differs:
-- `failed` → narrower scope retry or re-ask
+`[result s=fail]` means "I tried the task and couldn't complete it" — the subagent did its best. `[error]` means "something broke at the infrastructure level" — the subagent couldn't even attempt the task. The retry policy differs:
+- `s=fail` → narrower scope retry or re-ask
 - `error` → same-scope retry with backoff
 
 ### Why deterministic message ordering?

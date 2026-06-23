@@ -78,9 +78,6 @@ schemas:
           on-invalid:
             type: structured
             attrs: {status: int, str}
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
     enums:
       task-type: [code]
 
@@ -88,9 +85,6 @@ schemas:
     extends: core
     description: "Task dispatched to the Reviewer subagent"
     fields:
-      focus:
-        type: structured
-        attrs: {security: bool, style: bool, correctness: bool}
       context-ref:
         type: reference
     enums:
@@ -123,9 +117,6 @@ schemas:
     fields:
       test-cases:
         type: list-of-text
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
     enums:
       task-type: [test]
 
@@ -552,17 +543,11 @@ schemas:
           field:
             type: repeated
             attrs: {name: str, required: bool, type: str, rule: str}
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
 
   review-task:
     extends: core
-    description: "Reviewer task schema"
+    description: "Reviewer task schema (reviewer always covers correctness, security, style)"
     fields:
-      focus:
-        type: structured
-        attrs: {security: bool, style: bool, correctness: bool}
       context-ref:
         type: reference
 
@@ -585,17 +570,14 @@ schemas:
 
   test-task:
     extends: core
-    description: "Tester task schema"
+    description: "Tester task schema (test-file path implicit — by convention)"
     fields:
       test-cases:
         type: list-of-text
-      output-artifact:
-        type: repeated
-        attrs: {path: path}
 
   test-result:
     extends: core
-    description: "Tester result schema"
+    description: "Tester result schema (failures-only — only failing tests enumerated)"
     fields:
       test-suite:
         type: structured
@@ -604,7 +586,7 @@ schemas:
           test:
             type: repeated
             attrs: {name: str, status: enum, reason: str}
-            status: {values: [pass, fail, skip, error]}
+            status: {values: [fail, skip, error]}
 
 agents:
   main:

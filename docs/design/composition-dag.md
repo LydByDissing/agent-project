@@ -115,8 +115,8 @@ bd show llm-dsl-xxx
 
 # Agent does work, updates body with result DSL
 bd update llm-dsl-xxx --body-file - << 'DSL'
-[result id=t1 status=complete]
-[artifact type=file path=src/handlers/user.py action=modified lines=+23]
+[result id=t1 s=ok]
+[artifact a=mod n=+23 path=src/handlers/user.py]
 [added fn=validate_user_input in:RequestBody out:ValidationResult]
 [/result]
 DSL

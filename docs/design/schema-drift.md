@@ -24,29 +24,29 @@ When subagent A emits fields/tags that subagent B's schema doesn't declare, the 
 
 ```
 # Received from Reviewer:
-[result id=t2 status=complete]
+[result id=t2 s=ok]
   [verdict approve]                    ← known: pass
-  [security-check status=pass]         ← UNKNOWN: passthrough
+  [security-check s=pass]              ← UNKNOWN: passthrough
     [note]SQL injection N/A[/note]     ← child of passthrough: also preserved
   [/security-check]
-  [style status=pass]                  ← known: pass
+  [style s=pass]                       ← known: pass
 [/result]
 
 # Stored internally:
 {
   id: "t2",
-  status: "complete",
+  s: "ok",
   verdict: "approve",
-  style: {status: "pass"},
+  style: {s: "pass"},
   _passthrough: [
-    {tag: "security-check", attrs: {status: "pass"},
+    {tag: "security-check", attrs: {s: "pass"},
      children: [{tag: "note", text: "SQL injection N/A"}]}
   ]
 }
 
 # Re-serialized (wire form — byte-for-byte for passthrough):
-[result id=t2 status=complete style=pass verdict=approve]
-  [security-check status=pass]
+[result id=t2 s=ok style=pass verdict=approve]
+  [security-check s=pass]
     [note]SQL injection N/A[/note]
   [/security-check]
 [/result]
