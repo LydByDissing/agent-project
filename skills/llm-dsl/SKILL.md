@@ -1,16 +1,25 @@
 ---
 name: llm-dsl
 description: >
-  Default orchestration skill for any non-trivial task in this project. Main
-  agent plans, scopes, confirms with user, creates bd issues, then spawns a
-  haiku conductor-execute sub-agent to run the worker loop. Workers (haiku or
-  sonnet) do the actual code/review/test work, tracked via bd issues and
-  communicated in compact LLM-DSL. Use for ANY task that produces output: code
-  changes, file analysis, research, review, testing. Skip ONLY for pure Q&A or
-  one-line factual answers.
+  DEPRECATED. Do not use. Superseded by the sdd, plan, conductor, implement,
+  and arch-review skills. See skills/sdd/SKILL.md for the entry point.
 ---
 
-# LLM-DSL Skill
+# LLM-DSL Skill — DEPRECATED
+
+> **This skill is deprecated.** It has been superseded by the SDD skill suite:
+>
+> - Entry point: `skills/sdd/SKILL.md`
+> - Documentation: `skills/docs/SKILL.md`
+> - Planning: `skills/plan/SKILL.md`
+> - Orchestration: `skills/conductor/SKILL.md`
+> - Implementation: `skills/implement/SKILL.md`
+> - Architecture review: `skills/arch-review/SKILL.md`
+> - Shared standards: `skills/rules/RULES.md`, `skills/rules/TESTING.md`
+>
+> This file is kept for reference only. Do not invoke it.
+
+---
 
 ## Conductor Output Rules (Strict)
 

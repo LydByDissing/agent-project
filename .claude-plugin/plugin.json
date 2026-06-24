@@ -1,10 +1,10 @@
 {
-  "name": "llm-dsl",
-  "description": "Multi-agent workflow orchestration using LLM-DSL and bd (beads) issue tracker. Spawns Claude sub-agents (haiku/sonnet) via the Agent tool for code, review, and test work while a conductor agent (sonnet/opus) orchestrates and synthesizes.",
+  "name": "agent-project",
+  "description": "Spec-Driven Development (SDD) plugin. Autonomous multi-agent pipeline: docs → plan → implement → arch-review. Driven by sphinx-needs requirements and C4 architecture diagrams. Uses bd (beads) for issue tracking and agent coordination.",
   "author": {
     "name": "Tue Dissing",
     "email": "tue@somersault.dk"
   },
   "license": "Apache-2.0",
-  "version": "1.0.0"
+  "version": "2.0.0"
 }

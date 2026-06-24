@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "llm-dsl",
-  "description": "LLM-DSL multi-agent workflow orchestration for Claude Code",
+  "name": "agent-project",
+  "description": "Spec-Driven Development (SDD) plugin for Claude Code",
   "owner": {
     "name": "Tue Dissing",
     "email": "tue@somersault.dk"
   },
   "plugins": [
     {
-      "name": "llm-dsl",
-      "description": "Multi-agent workflow orchestration using LLM-DSL and bd (beads) issue tracker. Spawns Claude sub-agents (haiku/sonnet) for code, review, and test work while a conductor agent orchestrates and synthesizes.",
+      "name": "agent-project",
+      "description": "Spec-Driven Development (SDD) plugin. Autonomous multi-agent pipeline driven by sphinx-needs requirements and C4 architecture. Uses bd (beads) for state and agent coordination.",
       "author": {
         "name": "Tue Dissing",
         "email": "tue@somersault.dk"
