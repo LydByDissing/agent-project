@@ -126,16 +126,21 @@ the coder issue via `[ref]`.
 
 ### Identify relevant ADRs
 
-Before creating the reviewer task, scan ADRs for relevance to this feature:
+For each unique `c4_component` and `c4_container` touched by this feature,
+find ADRs whose `:c4_scope:` includes that component/container id or `system`:
 
 ```bash
-ls docs/specs/adrs/
-grep -l "<component_name>\|<technology_used>" docs/specs/adrs/adr-*.rst
+grep -rl ":c4_scope:.*\(system\|<component_id>\|<container_id>\)" docs/specs/adrs/
 ```
 
-Record only the ADR IDs that are relevant. These go into the reviewer task as
-`[adr ref=ADR-NNN]` entries so the reviewer reads only those — not the full
-ADR corpus.
+Also always include ADRs scoped to `system` — they apply to everything:
+
+```bash
+grep -rl ":c4_scope:.*system" docs/specs/adrs/
+```
+
+Deduplicate. Record only the matched ADR IDs. These go into the reviewer task
+as `[adr ref=ADR-NNN]` entries. The reviewer reads only those files.
 
 ---
 

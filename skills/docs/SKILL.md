@@ -132,6 +132,8 @@ A requirement is not ready until all six fields are answered.
 - What alternatives were considered and why were they rejected?
 - What are the consequences (positive and negative)?
 - Status: proposed | accepted | deprecated | superseded
+- Which C4 components or containers does this decision apply to?
+  (space-separated component/container ids, or `system` for system-wide decisions)
 
 ---
 
@@ -181,6 +183,7 @@ ADR-NNN: Decision Title
 .. adr:: Decision Title
    :id: ADR-NNN
    :status: accepted
+   :c4_scope: <component_id> <component_id> | system
 
    **Context**: Situation and forces at play.
 
@@ -195,6 +198,11 @@ ADR-NNN: Decision Title
    - Option A — rejected because …
    - Option B — rejected because …
 ```
+
+`:c4_scope:` takes a space-separated list of C4 component or container ids
+this decision governs. Use `system` when the decision applies everywhere
+(e.g. "use JWT for all auth"). This field is how plan finds relevant ADRs
+without reading the full corpus.
 
 Add to `./docs/specs/adrs/index.rst` toctree.
 

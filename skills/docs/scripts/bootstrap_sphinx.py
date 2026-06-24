@@ -34,11 +34,13 @@ needs_types = [
 
 # Extra fields beyond the sphinx-needs defaults
 needs_extra_options = [
-    "rationale",      # WHY this requirement exists (1-2 sentences)
+    "rationale",      # WHY this requirement or decision exists (1-2 sentences)
     "acceptance",     # Testable criterion, copied verbatim into bd task [accept]
     "non_goal",       # What this requirement explicitly does NOT cover
     "c4_component",   # C4 L3 component id that owns this requirement
     "c4_container",   # C4 L2 container this component lives in
+    "c4_scope",       # ADR only: space-separated component/container ids this decision
+                      # applies to, or 'system' for system-wide decisions
 ]
 
 needs_id_required = True
@@ -345,6 +347,7 @@ ADR-001: Example Decision
 .. adr:: Example Decision
    :id: ADR-001
    :status: accepted
+   :c4_scope: system
 
    **Context**: Describe the situation and forces at play.
 
@@ -358,6 +361,12 @@ ADR-001: Example Decision
 
    - Option A — rejected because …
    - Option B — rejected because …
+
+.. note::
+
+   ``c4_scope``: space-separated list of C4 component or container ids this
+   decision applies to. Use ``system`` for decisions that apply everywhere.
+   Examples: ``auth_service``, ``backend auth_service``, ``system``.
 '''
 
 
