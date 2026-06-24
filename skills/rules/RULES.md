@@ -1,7 +1,15 @@
 # SDD Rules — Shared Reference
 
-Read this file at the start of every `plan`, `implement`, and `arch-review` skill
-invocation. It is the single source of truth for standards that cross skill boundaries.
+Read only the sections relevant to your role:
+
+| Role | Read |
+|---|---|
+| coder | Code Style, [origin] Header, DSL → Result format |
+| tester | [origin] Header, DSL → Result format, Test Requirements row in table |
+| reviewer | DSL → Result format, bd Commands |
+| conductor | DSL → Exec + Synthesis formats, bd Commands |
+| plan | DSL → Task format, Model Selection, bd Commands |
+| arch-review | DSL → Result format, [origin] Header, bd Commands |
 
 ---
 

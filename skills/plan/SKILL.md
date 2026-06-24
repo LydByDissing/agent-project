@@ -112,12 +112,30 @@ implementation patterns and ownership boundaries, not boilerplate.
 
 ### Read C4 L2 container context
 
+For each unique `c4_container` referenced, extract only that container's section
+from `docs/architecture/containers.rst`. Do not read the whole file into context —
+grep for the container name and take that section only:
+
 ```bash
-cat docs/architecture/containers.rst
+grep -A 30 "<container_name>" docs/architecture/containers.rst
 ```
 
-For each `c4_container` referenced, extract the container's tech stack, what
-calls it, and what it calls. This becomes `[container]` in the bd task DSL.
+Extract tech stack, callers, and callees. This becomes `[container]` in the coder
+task DSL. Tester and reviewer tasks do not carry `[container]` — they read it from
+the coder issue via `[ref]`.
+
+### Identify relevant ADRs
+
+Before creating the reviewer task, scan ADRs for relevance to this feature:
+
+```bash
+ls docs/specs/adrs/
+grep -l "<component_name>\|<technology_used>" docs/specs/adrs/adr-*.rst
+```
+
+Record only the ADR IDs that are relevant. These go into the reviewer task as
+`[adr ref=ADR-NNN]` entries so the reviewer reads only those — not the full
+ADR corpus.
 
 ---
 
@@ -225,14 +243,9 @@ BD_TESTER=$(bd create "Tester: <component>" --silent \
 [task id=t2 type=test]
 [req id=REQ-XXX-NNN]
 [c4 component=<name> container=<name>]
-[component]
-  <same as coder task>
-[/component]
 [goal]write and run tests covering [accept] from task t1[/goal]
-[why]<same rationale>[/why]
 [accept]<acceptance criterion>[/accept]
-[non-goal]<same exclusions>[/non-goal]
-[ref t1.artifacts]
+[ref t1]
 [out tests/<path>]
 [/task]
 DSL
@@ -246,7 +259,8 @@ BD_REVIEWER=$(bd create "Reviewer: $FEAT_ID" --silent \
 [task id=tr type=review]
 [goal]review all coder output for FEAT_ID[/goal]
 [accept]no crit/major findings unaddressed; verdict is approve or request-changes[/accept]
-[ref t1.artifacts]
+[ref t1]
+[adr ref=ADR-NNN]
 [/task]
 DSL
 )

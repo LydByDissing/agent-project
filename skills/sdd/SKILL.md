@@ -165,7 +165,7 @@ Spawn the conductor as a sub-agent:
 
 ```python
 Agent(
-    model="sonnet",
+    model="haiku",
     description="Conductor: FEAT-XXX run RUN_ID",
     prompt=f"""
 Read skills/conductor/SKILL.md and execute it.

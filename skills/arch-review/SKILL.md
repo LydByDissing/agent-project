@@ -97,7 +97,7 @@ reviewer sub-agent to read the test files for subtler problems:
 
 ```python
 Agent(
-    model="sonnet",
+    model="haiku",
     description="Test quality review",
     prompt=f"""
 Read skills/rules/TESTING.md before starting.

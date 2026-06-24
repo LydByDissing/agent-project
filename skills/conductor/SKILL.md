@@ -103,37 +103,44 @@ Project directory: <CLAUDE_PROJECT_DIR>
 All file reads and writes must be inside this directory.
 Run all shell commands from this directory.
 
-Read skills/rules/RULES.md before starting.
-
 1. Read your task:
    bd show <bd_id>
 
-   Note these fields in the task body:
-   - [req id=...] — the requirement your work must satisfy
+   Task fields:
+   - [req id=...] — requirement to satisfy
    - [c4 component=... container=...] — where your code lives
-   - [component]...[/component] — implementation design for this component
-   - [container]...[/container] — system context for this container
-   - [why]...[/why] — rationale; use this to make design decisions
-   - [accept]...[/accept] — the acceptance criterion you must satisfy
-   - [non-goal]...[/non-goal] — what you must NOT implement
+   - [component]...[/component] — (coder task only) design patterns and ownership
+   - [container]...[/container] — (coder task only) system context
+   - [why]...[/why] — rationale; use this for design decisions
+   - [accept]...[/accept] — acceptance criterion you must satisfy
+   - [non-goal]...[/non-goal] — what NOT to implement
+   - [ref t1] — (tester/reviewer) read that issue for [component], [container], artifacts
 
 2. Do the work described in [goal], staying within scope.
 
-3. Coder/tester only: emit an [origin] header at the top of every source or
-   test file you create or materially modify (see RULES.md for format).
-   The c4= field must match [c4 component=... container=...] from the task.
+3. Coder/tester: write an [origin] header on every file you create or materially modify:
+   # [origin ref=<bd_id> req=REQ-XXX c4=<container>/<component>]
+   #   [intent]<one sentence — what this file does>[/intent]
+   # [/origin]
+   The c4= field must match [c4 component=... container=...] from the task exactly.
+   Skip on: config files, lockfiles, generated output, files you only deleted.
+   Comment prefix: # Python/shell/YAML, // JS/TS/Go/Rust/Java/C/C++, -- SQL
 
-4. Tester only: run the tests and verify they pass before writing the result.
-   If tests fail, fix the code or tests (whichever is wrong) and re-run.
-   Max 3 retry cycles. After 3 failures write s=blocked with the failure detail.
+4. Tester only:
+   - Tests MUST cover the [accept] criterion — that is the contract.
+   - Name tests as: test_<what>_<condition>_<expected_outcome>
+   - Use Arrange / Act / Assert structure. One behaviour per test.
+   - Never assert only `result is not None` — verify actual behaviour.
+   - Never mock the database — use real data stores.
+   - Run tests and verify they pass. Retry up to 3 cycles on failure.
+   - After 3 failures write s=blocked with exact failure output.
 
-5. If you discover something that requires a requirement not in the task:
-   Do NOT implement it. Write the result with s=blocked and include:
+5. Missing requirement: do NOT implement it. Write s=blocked with:
    [new-req]<description of the missing requirement>[/new-req]
 
-6. Verify your work meets every acceptance criterion.
+6. Verify acceptance criterion is met before writing result.
 
-7. Write result to bd:
+7. Write result:
    bd update <bd_id> --body-file - << 'DSL'
    [result id=<task_id> s=ok|partial|fail|blocked]
    [artifact path=<path> a=new|mod|del n=<lines>]
@@ -146,11 +153,10 @@ Read skills/rules/RULES.md before starting.
 
 8. Close: bd close <bd_id>
 
-Rules:
+Hard rules:
 - Do NOT create additional bd issues
-- Do NOT touch files outside your task's declared [out] paths
-- If you cannot meet any acceptance criterion: write s=blocked, explain why
-- Never work around a missing requirement — surface it with [new-req]
+- Do NOT touch files outside [out] paths
+- s=blocked if any acceptance criterion cannot be met — explain why
 ```
 
 ---

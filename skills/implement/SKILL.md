@@ -14,9 +14,10 @@ This skill defines the behavior of coder and tester worker sub-agents.
 Workers are spawned by the conductor with a bd issue ID and a project
 directory. They are not invoked by the user directly.
 
-Read `skills/rules/RULES.md` and `skills/rules/TESTING.md` before starting.
-TESTING.md is mandatory for tester workers — the arch-review skill runs a
-static sensor and LLM review on every test file you produce.
+This skill documents worker behaviour for reference and for the arch-review
+sensor. Workers receive their instructions inline via the conductor prompt —
+they do not load this file directly. TESTING.md and RULES.md are the
+authoritative references for quality standards.
 
 ---
 
@@ -97,15 +98,15 @@ bd close <bd_id>
 bd show <bd_id>
 ```
 
-Read all fields as described for the coder. Pay particular attention to
-`[accept]` — this is what the tests must verify.
-
-Read `[ref t1.artifacts]` — then read the coder's bd issue to find the
-artifact paths:
+Your task carries `[req]`, `[accept]`, `[c4]`, and `[ref t1]`. The `[ref t1]`
+points to the coder issue. Read it next:
 
 ```bash
 bd show <coder_bd_id>
 ```
+
+The coder issue carries `[component]` and `[container]` — read those for design
+context. Also parse `[artifact]` entries to find the implementation files.
 
 ### 2. Read the implementation
 
@@ -196,14 +197,13 @@ For each requirement covered by the coder tasks:
 
 ### 4. Check ADR compliance
 
-Read all ADRs:
+Read only the ADRs tagged in the task via `[adr ref=ADR-NNN]` entries:
 
 ```bash
-ls docs/specs/adrs/
-cat docs/specs/adrs/adr-*.rst
+cat docs/specs/adrs/adr-<NNN>-*.rst   # one read per tagged ADR
 ```
 
-Flag any violation.
+Flag any violation. Do not read the full ADR corpus.
 
 ### 5. Write result
 
