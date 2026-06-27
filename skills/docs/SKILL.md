@@ -37,16 +37,28 @@ Never skip step 7. The user must read and approve before the sdd pipeline advanc
 
 ## Step 1 — Bootstrap
 
-Check whether `./docs/conf.py` exists. If not, run:
+Check whether `./docs/source/conf.py` exists. If not, run:
 
 ```bash
-python <skill-path>/scripts/bootstrap_sphinx.py
-pip install -r docs/requirements.txt
+python3 <skill-path>/scripts/bootstrap_sphinx.py
 ```
 
-If `./docs/conf.py` already exists, verify `sphinxcontrib.needs` is in
-`extensions`. If not, add it and add the `needs_types` and `needs_extra_options`
-blocks from the bootstrap script's `CONF_PY` template.
+The bootstrap script creates:
+- `docs/source/` — all RST files and `conf.py`
+- `docs/Makefile` — uses `SOURCEDIR = source` and `docs/.venv/bin/sphinx-build`
+- `docs/.venv` — isolated Python venv with all Sphinx dependencies installed
+- `docs/requirements.txt` — pinned dependency list
+
+No system-level pip installs are needed or used.
+
+If `./docs/source/conf.py` already exists, verify `sphinx_needs` is in
+`extensions`. If not, add it and add the `needs_types` and `needs_fields`
+blocks from the bootstrap script's `CONF_PY` template. Also check that
+`docs/.venv` exists; if not, create it:
+
+```bash
+python3 -m venv docs/.venv && docs/.venv/bin/pip3 install -r docs/requirements.txt -q
+```
 
 ---
 
@@ -141,7 +153,7 @@ A requirement is not ready until all six fields are answered.
 
 ### Feature and Requirements
 
-File: `./docs/specs/features/<feature-name>.rst`
+File: `./docs/source/specs/features/<feature-name>.rst`
 
 ```rst
 Feature Name
@@ -170,11 +182,11 @@ Requirements
    system behaviour.
 ```
 
-Add the new file to `./docs/specs/features/index.rst` toctree.
+Add the new file to `./docs/source/specs/features/index.rst` toctree.
 
 ### ADR
 
-File: `./docs/specs/adrs/adr-<NNN>-<slug>.rst`
+File: `./docs/source/specs/adrs/adr-<NNN>-<slug>.rst`
 
 ```rst
 ADR-NNN: Decision Title
@@ -204,11 +216,11 @@ this decision governs. Use `system` when the decision applies everywhere
 (e.g. "use JWT for all auth"). This field is how plan finds relevant ADRs
 without reading the full corpus.
 
-Add to `./docs/specs/adrs/index.rst` toctree.
+Add to `./docs/source/specs/adrs/index.rst` toctree.
 
 ### C4 — System Context
 
-File: `./docs/architecture/diagrams/context.puml`
+File: `./docs/source/architecture/diagrams/context.puml`
 
 ```plantuml
 @startuml context
@@ -233,7 +245,7 @@ RST page: `./docs/architecture/context.rst` — include the rendered SVG.
 
 ### C4 — Containers
 
-File: `./docs/architecture/diagrams/containers.puml`
+File: `./docs/source/architecture/diagrams/containers.puml`
 
 ```plantuml
 @startuml containers
@@ -262,7 +274,7 @@ SHOW_LEGEND()
 
 ### C4 — Components (one file per container)
 
-File: `./docs/architecture/diagrams/components_<container>.puml`
+File: `./docs/source/architecture/diagrams/components_<container>.puml`
 
 ```plantuml
 @startuml components_[container]
@@ -283,7 +295,7 @@ SHOW_LEGEND()
 @enduml
 ```
 
-RST page: `./docs/architecture/components/<container-name>.rst`
+RST page: `./docs/source/architecture/components/<container-name>.rst`
 
 **Write the component narrative section with care.** This is what plan reads to
 populate `[component]` in bd tasks. For each component include:
@@ -295,7 +307,7 @@ populate `[component]` in bd tasks. For each component include:
 
 ### ArchiMate — Enterprise View
 
-File: `./docs/architecture/diagrams/archimate_<view>.puml`
+File: `./docs/source/architecture/diagrams/archimate_<view>.puml`
 
 ```plantuml
 @startuml archimate_enterprise
@@ -319,11 +331,17 @@ Rel_Assignment(tn_server, ac_app, "hosts")
 ## Step 5 — Render Diagrams
 
 ```bash
-python <skill-path>/scripts/generate_diagrams.py
+python3 <skill-path>/scripts/generate_diagrams.py
 ```
 
-If plantuml is not on PATH, the script prints installation instructions. Fix
-before continuing.
+PlantUML is resolved automatically in this order:
+1. `PLANTUML_JAR` env var (explicit `.jar` path)
+2. `plantuml` on PATH
+3. `~/.local/share/plantuml/plantuml.jar` — downloaded automatically on
+   first run from the latest GitHub release if not present.
+
+The only hard dependency is `java` on PATH. If `java` is missing, the script
+exits with a clear install instruction. No manual plantuml install needed.
 
 ---
 
@@ -393,32 +411,36 @@ notified so the reset counter is incremented on the epic.
 
 ```
 ./docs/
-├── conf.py                                  # Sphinx + sphinx-needs config
-├── index.rst                                # Root TOC
-├── Makefile
-├── requirements.txt                         # sphinx + furo + sphinx-needs
-├── about.rst
-├── _static/
-├── _templates/
-├── architecture/
-│   ├── index.rst
-│   ├── context.rst                          # C4 L1
-│   ├── containers.rst                       # C4 L2
-│   ├── components/
-│   │   └── <container-name>.rst             # C4 L3, one per container
-│   └── diagrams/
-│       ├── context.puml / context.svg
-│       ├── containers.puml / containers.svg
-│       ├── components_<name>.puml / .svg
-│       └── archimate_<view>.puml / .svg
-└── specs/
-    ├── index.rst                            # Traceability matrix (needtable)
-    ├── features/
+├── Makefile                                 # SOURCEDIR=source, uses .venv/bin/sphinx-build
+│                                            #   make html  — build
+│                                            #   make live  — sphinx-autobuild on :8000
+├── requirements.txt                         # sphinx + furo + sphinx-needs + sphinx-autobuild
+├── .venv/                                   # isolated Python venv (gitignored)
+└── source/                                  # all RST + conf.py (Sphinx SOURCEDIR)
+    ├── conf.py                              # Sphinx + sphinx-needs config
+    ├── index.rst                            # Root TOC
+    ├── about.rst
+    ├── _static/
+    ├── _templates/
+    ├── architecture/
     │   ├── index.rst
-    │   └── <feature-name>.rst               # feat + req directives
-    └── adrs/
-        ├── index.rst
-        └── adr-<NNN>-<slug>.rst
+    │   ├── context.rst                      # C4 L1
+    │   ├── containers.rst                   # C4 L2
+    │   ├── components/
+    │   │   └── <container-name>.rst         # C4 L3, one per container
+    │   └── diagrams/
+    │       ├── context.puml / context.svg
+    │       ├── containers.puml / containers.svg
+    │       ├── components_<name>.puml / .svg
+    │       └── archimate_<view>.puml / .svg
+    └── specs/
+        ├── index.rst                        # Traceability matrix (needtable)
+        ├── features/
+        │   ├── index.rst
+        │   └── <feature-name>.rst           # feat + req directives
+        └── adrs/
+            ├── index.rst
+            └── adr-<NNN>-<slug>.rst
 ```
 
 ---

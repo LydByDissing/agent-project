@@ -4,10 +4,10 @@
 Usage (from project root):
     python <skill-path>/scripts/generate_diagrams.py [--docs-dir docs]
 
-Requires plantuml on PATH. Install via:
-    macOS:          brew install plantuml
-    Ubuntu/Debian:  apt install plantuml
-    Or set PLANTUML_JAR=/path/to/plantuml.jar to use the JAR directly.
+PlantUML is resolved in order:
+  1. PLANTUML_JAR env var (explicit path to .jar)
+  2. plantuml on PATH
+  3. ~/.local/share/plantuml/plantuml.jar (auto-downloaded if missing)
 """
 
 import argparse
@@ -15,7 +15,23 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
+
+PLANTUML_DOWNLOAD_URL = "https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar"
+PLANTUML_JAR_CACHE = Path.home() / ".local" / "share" / "plantuml" / "plantuml.jar"
+
+
+def _java_available() -> bool:
+    return shutil.which("java") is not None
+
+
+def _download_plantuml() -> Path:
+    PLANTUML_JAR_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading PlantUML from {PLANTUML_DOWNLOAD_URL} ...")
+    urllib.request.urlretrieve(PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CACHE)
+    print(f"Saved to {PLANTUML_JAR_CACHE}")
+    return PLANTUML_JAR_CACHE
 
 
 def find_plantuml() -> list[str]:
@@ -24,7 +40,12 @@ def find_plantuml() -> list[str]:
         return ["java", "-jar", jar]
     if shutil.which("plantuml"):
         return ["plantuml"]
-    return []
+    if not _java_available():
+        print("java is not on PATH — required to run the PlantUML jar.")
+        print("Install Java (e.g. apt install default-jre) and re-run.")
+        sys.exit(1)
+    jar_path = PLANTUML_JAR_CACHE if PLANTUML_JAR_CACHE.exists() else _download_plantuml()
+    return ["java", "-jar", str(jar_path)]
 
 
 def render_file(puml_path: Path, plantuml_cmd: list[str]) -> bool:
@@ -43,7 +64,7 @@ def render_file(puml_path: Path, plantuml_cmd: list[str]) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--docs-dir", default="docs", help="Path to the Sphinx docs directory (default: docs)")
+    parser.add_argument("--docs-dir", default="docs/source", help="Path to the Sphinx source directory (default: docs/source)")
     args = parser.parse_args()
 
     docs_dir = Path(args.docs_dir)
@@ -55,12 +76,6 @@ def main() -> None:
         sys.exit(1)
 
     plantuml_cmd = find_plantuml()
-    if not plantuml_cmd:
-        print("plantuml not found. Install it and try again:")
-        print("  macOS:          brew install plantuml")
-        print("  Ubuntu/Debian:  apt install plantuml")
-        print("  JAR:            export PLANTUML_JAR=/path/to/plantuml.jar")
-        sys.exit(1)
 
     puml_files = sorted(diagrams_dir.rglob("*.puml"))
     if not puml_files:

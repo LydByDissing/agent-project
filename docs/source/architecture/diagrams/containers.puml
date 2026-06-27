@@ -1,0 +1,26 @@
+@startuml containers
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Container Diagram: agent-project
+
+Person(dev, "Developer", "Uses /sdd to drive features")
+
+System_Boundary(sys, "agent-project") {
+    Container(skills, "SDD Skills", "Python / SKILL.md prompts\nrunning in Claude Code", "Pipeline skills: sdd, docs, plan,\nconductor, implement, arch-review,\ngithub-bridge")
+    ContainerDb(beads_db, "Beads DB", "SQLite / Dolt\n(.beads/*.db)", "Agent work items (DSL), epic state,\nphase tracking, dependency graph")
+    Container(docs_site, "Sphinx Docs Site", "Sphinx + sphinx-needs\n(RST -> HTML)", "Architecture (C4 L1-L3),\nfeature specs, requirements (REQ-*),\nADRs -- the human-readable truth")
+}
+
+System_Ext(github, "GitHub", "Issues, Projects board,\ncomments")
+System_Ext(claude, "Claude API", "LLM inference")
+
+Rel(dev, skills, "Invokes /sdd #N", "Claude Code CLI")
+Rel(skills, beads_db, "Creates/reads/closes\nDSL issues + epics", "bd CLI")
+Rel(skills, docs_site, "Writes RST\nBuilds + verifies", "File I/O + make html")
+Rel(skills, github, "Reads issue body + comments\nPosts comments, closes,\nmoves Project cards", "gh CLI")
+Rel(skills, claude, "Spawns sub-agents", "Claude API")
+Rel(dev, docs_site, "Reads specs\nand architecture", "Browser")
+Rel(dev, github, "Authors issues\nReads SDD progress", "GitHub UI")
+
+SHOW_LEGEND()
+@enduml

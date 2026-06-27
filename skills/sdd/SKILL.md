@@ -1,12 +1,16 @@
+<!-- [origin ref=llm-dsl-yms.3 req=REQ-GITHUB-ISSUES-002,REQ-GITHUB-ISSUES-003 c4=sdd_skills/sdd_orchestrator]
+  [intent]Entry point for Spec-Driven Development pipeline; orchestrates docs, plan, implement, and arch-review phases with support for GitHub issue integration.[/intent]
+[/origin] -->
+
 ---
 name: sdd
 description: >
   Spec-Driven Development entry point. Drives the full SDD pipeline
-  autonomously: docs → plan → implement → arch-review. Takes a feature name
-  or FEAT-XXX identifier. State is tracked in a bd epic. Resumes from current
-  phase if the epic already exists. Resets to docs phase when any downstream
-  skill surfaces a new requirement. Use whenever starting or continuing work
-  on a feature.
+  autonomously: docs → plan → implement → arch-review. Takes a feature name,
+  FEAT-XXX identifier, or GitHub issue number (#N). State is tracked in a bd
+  epic. Resumes from current phase if the epic already exists. Resets to docs
+  phase when any downstream skill surfaces a new requirement. Use whenever
+  starting or continuing work on a feature.
 ---
 
 # SDD Skill — Spec-Driven Development
@@ -22,6 +26,7 @@ Read `skills/rules/RULES.md` before starting.
 ## Invocation
 
 ```
+/sdd #N                            start from a GitHub issue (fetch, derive FEAT-ID)
 /sdd <feature-name-or-FEAT-XXX>    start or resume a specific feature
 /sdd                               resume any in-progress feature (most recent epic)
 ```
@@ -55,9 +60,16 @@ Epic labels:
 - `run=<run_id>` — 8-char hex run identifier
 - `reset-count=<n>` — number of times the pipeline has reset to docs
 
+External reference (GitHub issue):
+- `--external-ref gh-N` — link to GitHub issue (if invoked via /sdd #N)
+
 ```bash
 # Create epic
 EPIC_ID=$(bd epic create "SDD: FEAT-XXX — <feature title>")
+bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
+
+# Create epic with external reference (for GitHub issue integration)
+EPIC_ID=$(bd epic create "SDD: FEAT-XXX — <feature title>" --external-ref gh-N)
 bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
 
 # Read current phase
@@ -71,6 +83,55 @@ bd epic update $EPIC_ID --label "phase=plan"
 
 ## Workflow
 
+### -1. GitHub Issue Resolution (if invoked as /sdd #N)
+
+If the user invokes `/sdd #N` with a GitHub issue number:
+
+```bash
+GITHUB_ISSUE_NUM=N
+EXTERNAL_REF="gh-$GITHUB_ISSUE_NUM"
+
+import sys
+sys.path.insert(0, "$CLAUDE_PROJECT_DIR/src")
+from github_bridge import fetch_issue
+
+ISSUE_TEXT=$(python3 << 'PYEOF'
+import sys
+sys.path.insert(0, "$CLAUDE_PROJECT_DIR/src")
+from github_bridge import fetch_issue
+print(fetch_issue($GITHUB_ISSUE_NUM))
+PYEOF
+)
+
+ISSUE_TITLE=$(echo "$ISSUE_TEXT" | head -1 | sed 's/^Title: //')
+```
+
+**Derive FEAT-ID from issue title:**
+
+```bash
+FEAT_ID=$(python3 -c "
+import sys; sys.path.insert(0, '$CLAUDE_PROJECT_DIR/src')
+from feat_id import derive_feat_id
+print(derive_feat_id(sys.stdin.read().strip()))
+" <<< "$ISSUE_TITLE")
+```
+
+**Present to user with override option:**
+
+```
+GitHub Issue #$GITHUB_ISSUE_NUM
+
+Title: $ISSUE_TITLE
+
+Derived FEAT-ID: $FEAT_ID
+
+Confirm FEAT-ID or enter override (or blank to cancel):
+```
+
+If user approves (or provides override), proceed with the derived FEAT_ID.
+
+---
+
 ### 0. Setup
 
 Generate a run ID and find or create the epic:
@@ -78,11 +139,16 @@ Generate a run ID and find or create the epic:
 ```bash
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 
+EPIC_CREATE_OPTS=""
+if [ -n "$EXTERNAL_REF" ]; then
+  EPIC_CREATE_OPTS="--external-ref $EXTERNAL_REF"
+fi
+
 # Check for existing epic
 EPIC_ID=$(bd list --label "feat=FEAT-XXX" --type epic --status open | head -1 | awk '{print $1}')
 
 if [ -z "$EPIC_ID" ]; then
-  EPIC_ID=$(bd epic create "SDD: FEAT-XXX — <feature title>")
+  EPIC_ID=$(bd epic create $EPIC_CREATE_OPTS "SDD: FEAT-XXX — <feature title>")
   bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
 fi
 
@@ -138,6 +204,7 @@ Inputs:
 - FEAT_ID: FEAT-XXX
 - EPIC_ID: <epic_id>
 - RUN_ID: <run_id>
+- EXTERNAL_REF: <gh-N or empty>
 - CLAUDE_PROJECT_DIR: <project_dir>
 
 The plan skill runs its preflight, extract, decompose, confirm gate, and
@@ -152,6 +219,13 @@ If plan returns `reset:<reason>`:
 - Re-run from docs phase
 
 If plan returns an `[exec]` block:
+- Extract all job IDs from the [exec] block
+- If EXTERNAL_REF is set, add it to each job:
+  ```bash
+  for JOB_ID in <extracted_ids>; do
+    bd update $JOB_ID --external-ref $EXTERNAL_REF
+  done
+  ```
 - Update epic: `phase=implement`
 - Advance to conductor
 

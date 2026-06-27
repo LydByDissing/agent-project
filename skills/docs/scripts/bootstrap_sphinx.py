@@ -4,20 +4,26 @@
 Creates the full structure for C4 architecture diagrams and sphinx-needs
 requirements (features, requirements, ADRs). Idempotent: safe to run multiple
 times. Skips files that already exist.
+
+Also creates docs/.venv and installs docs/requirements.txt into it so Sphinx
+never touches the system Python.
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 
 DOCS_DIR = Path("docs")
+SOURCE_DIR = DOCS_DIR / "source"
 
 CONF_PY = '''\
 project = "{project_name}"
 author = "Architecture Team"
 release = "0.1.0"
 
-extensions = ["sphinxcontrib.needs"]
+extensions = ["sphinx_needs"]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
@@ -32,16 +38,16 @@ needs_types = [
     dict(directive="adr", title="Architecture Decision Record", prefix="ADR-", color="#DF744A", style="node"),
 ]
 
-# Extra fields beyond the sphinx-needs defaults
-needs_extra_options = [
-    "rationale",      # WHY this requirement or decision exists (1-2 sentences)
-    "acceptance",     # Testable criterion, copied verbatim into bd task [accept]
-    "non_goal",       # What this requirement explicitly does NOT cover
-    "c4_component",   # C4 L3 component id that owns this requirement
-    "c4_container",   # C4 L2 container this component lives in
-    "c4_scope",       # ADR only: space-separated component/container ids this decision
-                      # applies to, or 'system' for system-wide decisions
-]
+# Extra fields beyond the sphinx-needs defaults (sphinx-needs >= 2.0 dict format)
+_str_field = {{"schema": {{"type": "string"}}, "default": ""}}
+needs_fields = {{
+    "rationale":    {{**_str_field, "description": "WHY this requirement or decision exists"}},
+    "acceptance":   {{**_str_field, "description": "Testable criterion, copied verbatim into bd task [accept]"}},
+    "non_goal":     {{**_str_field, "description": "What this requirement explicitly does NOT cover"}},
+    "c4_component": {{**_str_field, "description": "C4 L3 component id that owns this requirement"}},
+    "c4_container": {{**_str_field, "description": "C4 L2 container this component lives in"}},
+    "c4_scope":     {{**_str_field, "description": "ADR: space-separated component/container ids, or 'system'"}},
+}}
 
 needs_id_required = True
 needs_id_regex = "^(FEAT|REQ|ADR)-[A-Z0-9-]+"
@@ -52,18 +58,22 @@ REQUIREMENTS_TXT = '''\
 sphinx>=7.0
 furo
 sphinx-needs>=2.0
+sphinx-autobuild
 '''
 
 MAKEFILE = '''\
 SPHINXOPTS    ?=
-SPHINXBUILD   ?= sphinx-build
-SOURCEDIR     = .
+SPHINXBUILD   ?= .venv/bin/sphinx-build
+SOURCEDIR     = source
 BUILDDIR      = _build
 
 help:
 \t@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile
+.PHONY: help live Makefile
+
+live:
+\t.venv/bin/sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS)
 
 %: Makefile
 \t@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
@@ -370,6 +380,20 @@ ADR-001: Example Decision
 '''
 
 
+def setup_venv(docs_dir: Path) -> None:
+    venv_dir = docs_dir / ".venv"
+    if venv_dir.exists():
+        print(f"  skip   {venv_dir}  (already exists)")
+        return
+    print(f"  create {venv_dir}  (Python venv)")
+    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+    pip = venv_dir / "bin" / "pip"
+    req = docs_dir / "requirements.txt"
+    print(f"  pip install -r {req} (into venv) ...")
+    subprocess.run([str(pip), "install", "-r", str(req), "-q"], check=True)
+    print(f"  venv ready: {venv_dir}")
+
+
 def write_if_missing(path: Path, content: str) -> None:
     if path.exists():
         print(f"  skip   {path}  (already exists)")
@@ -404,53 +428,60 @@ def main() -> None:
     print(f"Bootstrapping Sphinx + sphinx-needs docs site for: {project_name}")
     print(f"Target directory: {DOCS_DIR.resolve()}\n")
 
-    write_if_missing(DOCS_DIR / "conf.py", CONF_PY.format(project_name=project_name))
+    # docs/ root: Makefile, requirements.txt, venv (source lives in docs/source/)
     write_if_missing(DOCS_DIR / "requirements.txt", REQUIREMENTS_TXT)
     write_if_missing(DOCS_DIR / "Makefile", MAKEFILE)
+
+    # docs/source/: all RST + conf.py
+    write_if_missing(SOURCE_DIR / "conf.py", CONF_PY.format(project_name=project_name))
     write_if_missing(
-        DOCS_DIR / "index.rst",
+        SOURCE_DIR / "index.rst",
         INDEX_RST.format(
             project_name=project_name,
             underline=underline,
             project_name_slug=project_name_slug,
         ),
     )
-    write_if_missing(DOCS_DIR / "about.rst", ABOUT_RST)
-    write_if_missing(DOCS_DIR / "_static" / ".gitkeep", "")
-    write_if_missing(DOCS_DIR / "_templates" / ".gitkeep", "")
+    write_if_missing(SOURCE_DIR / "about.rst", ABOUT_RST)
+    write_if_missing(SOURCE_DIR / "_static" / ".gitkeep", "")
+    write_if_missing(SOURCE_DIR / "_templates" / ".gitkeep", "")
 
     # Architecture section
-    write_if_missing(DOCS_DIR / "architecture" / "index.rst", ARCH_INDEX_RST)
-    write_if_missing(DOCS_DIR / "architecture" / "context.rst", CONTEXT_RST)
-    write_if_missing(DOCS_DIR / "architecture" / "containers.rst", CONTAINERS_RST)
-    write_if_missing(DOCS_DIR / "architecture" / "components" / ".gitkeep", "")
-    write_if_missing(DOCS_DIR / "architecture" / "diagrams" / "context.puml", CONTEXT_PUML)
-    write_if_missing(DOCS_DIR / "architecture" / "diagrams" / "containers.puml", CONTAINERS_PUML)
+    write_if_missing(SOURCE_DIR / "architecture" / "index.rst", ARCH_INDEX_RST)
+    write_if_missing(SOURCE_DIR / "architecture" / "context.rst", CONTEXT_RST)
+    write_if_missing(SOURCE_DIR / "architecture" / "containers.rst", CONTAINERS_RST)
+    write_if_missing(SOURCE_DIR / "architecture" / "components" / ".gitkeep", "")
+    write_if_missing(SOURCE_DIR / "architecture" / "diagrams" / "context.puml", CONTEXT_PUML)
+    write_if_missing(SOURCE_DIR / "architecture" / "diagrams" / "containers.puml", CONTAINERS_PUML)
 
     # Specifications section (sphinx-needs)
-    write_if_missing(DOCS_DIR / "specs" / "index.rst", SPECS_INDEX_RST)
-    write_if_missing(DOCS_DIR / "specs" / "features" / "index.rst", FEATURES_INDEX_RST)
-    write_if_missing(DOCS_DIR / "specs" / "features" / "example.rst", FEATURE_EXAMPLE_RST)
-    write_if_missing(DOCS_DIR / "specs" / "adrs" / "index.rst", ADRS_INDEX_RST)
-    write_if_missing(DOCS_DIR / "specs" / "adrs" / "adr-001-example.rst", ADR_EXAMPLE_RST)
+    write_if_missing(SOURCE_DIR / "specs" / "index.rst", SPECS_INDEX_RST)
+    write_if_missing(SOURCE_DIR / "specs" / "features" / "index.rst", FEATURES_INDEX_RST)
+    write_if_missing(SOURCE_DIR / "specs" / "features" / "example.rst", FEATURE_EXAMPLE_RST)
+    write_if_missing(SOURCE_DIR / "specs" / "adrs" / "index.rst", ADRS_INDEX_RST)
+    write_if_missing(SOURCE_DIR / "specs" / "adrs" / "adr-001-example.rst", ADR_EXAMPLE_RST)
+
+    setup_venv(DOCS_DIR)
 
     print(f"""
 Done. Next steps:
-  1. Install dependencies:
-       pip install -r {DOCS_DIR}/requirements.txt
+  1. Run the docs skill C4 interview to populate architecture pages.
 
-  2. Run the docs skill C4 interview to populate architecture pages.
+  2. Add features and requirements under docs/source/specs/features/.
 
-  3. Add features and requirements under docs/specs/features/.
+  3. Render diagrams to SVG:
+       python3 <skill-path>/scripts/generate_diagrams.py
 
-  4. Render diagrams to SVG:
-       python <skill-path>/scripts/generate_diagrams.py
-
-  5. Build the docs:
+  4. Build the docs:
        cd {DOCS_DIR} && make html
+
+  5. Live preview with auto-rebuild:
+       cd {DOCS_DIR} && make live
 
   6. Open in browser:
        open {DOCS_DIR}/_build/html/index.html
+
+Note: Sphinx runs from docs/.venv — no global pip installs needed.
 """)
 
 

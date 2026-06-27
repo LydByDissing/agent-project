@@ -1,0 +1,38 @@
+@startuml components_sdd_skills
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Component Diagram: SDD Skills Container
+
+Container_Boundary(skills, "SDD Skills") {
+    Component(orch, "SDD Orchestrator", "sdd/SKILL.md", "Entry point. Creates bd epic,\ndrives phase loop, handles resets.\nDerives FEAT-ID from GitHub issue.")
+    Component(gh_bridge, "GitHub Bridge", "Invoked by orch + docs", "Fetches issue body + comments\n(with timestamps). Posts comments.\nCloses issues. Moves Project cards.\nUpdates issue description.")
+    Component(docs_skill, "Docs Skill", "docs/SKILL.md", "C4 interview (L1–L3).\nWrites RST + sphinx-needs directives.\nBootstraps Sphinx site. Renders diagrams.\nBuilds + verifies docs.")
+    Component(plan_skill, "Plan Skill", "plan/SKILL.md", "Preflight checks. Decomposes\nrequirements into bd tasks.\nCreates bd issues with DSL briefs.\nConfirm gate before issue creation.")
+    Component(conductor, "Conductor", "conductor/SKILL.md", "Wave-based worker spawner.\nOrders workers by dependency graph.\nCollects synthesis block. Detects resets.")
+    Component(implement, "Implement", "implement/SKILL.md", "Coder, tester, reviewer workers.\nWrite code + tests. Must pass tests.\nSurface new requirements as [new-req].")
+    Component(arch_review, "Arch-Review", "arch-review/SKILL.md", "REQ coverage check. C4 boundary\nvalidation. ADR compliance. Test\nquality sensors. Approval gate.")
+}
+
+ContainerDb(beads_db, "Beads DB", "SQLite/Dolt", "")
+Container(docs_site, "Sphinx Docs", "RST + HTML", "")
+System_Ext(github, "GitHub", "")
+System_Ext(claude, "Claude API", "")
+
+Rel(orch, gh_bridge, "fetch issue context\npost progress updates", "on phase transitions")
+Rel(orch, docs_skill, "invoke docs phase", "")
+Rel(orch, plan_skill, "invoke plan phase", "")
+Rel(orch, conductor, "invoke implement phase\nwith [exec] block", "")
+Rel(orch, arch_review, "invoke arch-review phase", "")
+Rel(orch, beads_db, "create epic, track phase label", "bd CLI")
+Rel(docs_skill, docs_site, "write RST, build HTML", "file I/O + make html")
+Rel(docs_skill, gh_bridge, "receives GitHub context\nas interview brief", "")
+Rel(plan_skill, beads_db, "create bd task issues\nwith --external-ref gh-N", "bd CLI")
+Rel(conductor, claude, "spawn worker sub-agents", "Claude API")
+Rel(conductor, beads_db, "read/close task issues", "bd CLI")
+Rel(implement, beads_db, "update result on task issue", "bd CLI")
+Rel(arch_review, docs_site, "read C4 + REQ docs", "file I/O")
+Rel(arch_review, beads_db, "read closed tasks\nfor coverage check", "bd CLI")
+Rel(gh_bridge, github, "gh issue view / comment /\nclose / project move", "gh CLI")
+
+SHOW_LEGEND()
+@enduml

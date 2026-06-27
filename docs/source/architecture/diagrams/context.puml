@@ -1,0 +1,26 @@
+@startuml context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title System Context: agent-project (SDD Plugin)
+
+Person(dev, "Developer", "Uses /sdd to drive features\nfrom spec to reviewed code")
+
+System_Boundary(sys, "agent-project") {
+    System(sdd, "SDD Plugin", "Claude Code plugin that runs\nthe spec-driven development pipeline")
+}
+
+System_Ext(github, "GitHub", "Hosts feature issues in NL form.\nSource of project intent and\nhuman/LLM discussion threads.")
+System_Ext(beads, "Beads (bd)", "Local agent issue tracker.\nHolds DSL work items and\nSDD pipeline state.")
+System_Ext(claude, "Claude API", "LLM inference for all\nagent skills (docs, plan,\nconduct, implement, review)")
+System_Ext(sphinx, "Sphinx Docs Site", "Static HTML site generated\nfrom RST specs. Human-readable\nsource of architectural truth.")
+
+Rel(dev, sdd, "Invokes /sdd #N or /sdd FEAT-XXX", "Claude Code CLI")
+Rel(sdd, github, "Reads issues + comments\nPosts comments, closes issues\nMoves Project cards", "gh CLI / GitHub API")
+Rel(sdd, beads, "Creates and reads\nDSL work items, tracks phases", "bd CLI")
+Rel(sdd, claude, "Spawns sub-agents\nfor each pipeline phase", "Claude API")
+Rel(sdd, sphinx, "Writes RST specs\nBuilds and verifies docs", "sphinx-build")
+Rel(dev, sphinx, "Reads architecture +\nrequirements docs", "Browser")
+Rel(dev, github, "Authors feature issues\nReads progress comments", "GitHub UI")
+
+SHOW_LEGEND()
+@enduml
