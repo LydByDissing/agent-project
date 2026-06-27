@@ -1,3 +1,7 @@
+# [origin ref=llm-dsl-5db req=REQ-DESIGN-CHAT-003 c4=sdd_skills/docs_skill]
+#   [intent]Bootstrap script that creates the Sphinx documentation site structure with design log support[/intent]
+# [/origin]
+
 #!/usr/bin/env python3
 """Bootstrap a Sphinx + sphinx-needs documentation site in ./docs/ for SDD projects.
 
@@ -96,6 +100,12 @@ INDEX_RST = '''\
    :caption: Specifications
 
    specs/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Design Log
+
+   design_log/index
 
 .. toctree::
    :maxdepth: 1
@@ -296,6 +306,32 @@ All requirements across all features:
    :style: table
 '''
 
+DESIGN_LOG_INDEX_RST = '''\
+Design Log
+==========
+
+Record of design decisions made during development. Each design log entry
+documents the decision, its rationale, and alternatives considered.
+
+Design log entries are organized by feature and named ``FEAT-<NAME>-<RRR>.rst``,
+where ``FEAT-<NAME>`` is the feature ID and ``<RRR>`` is a revision number.
+
+Quick Lookup
+------------
+
+Find entries for a feature::
+
+   grep -r "FEAT-XXX" docs/source/design_log/
+
+Find entries mentioning a component::
+
+   grep -r "c4_component: component_id" docs/source/design_log/
+
+.. toctree::
+   :maxdepth: 1
+
+'''
+
 FEATURES_INDEX_RST = '''\
 Features
 ========
@@ -460,6 +496,9 @@ def main() -> None:
     write_if_missing(SOURCE_DIR / "specs" / "features" / "example.rst", FEATURE_EXAMPLE_RST)
     write_if_missing(SOURCE_DIR / "specs" / "adrs" / "index.rst", ADRS_INDEX_RST)
     write_if_missing(SOURCE_DIR / "specs" / "adrs" / "adr-001-example.rst", ADR_EXAMPLE_RST)
+
+    # Design Log section
+    write_if_missing(SOURCE_DIR / "design_log" / "index.rst", DESIGN_LOG_INDEX_RST)
 
     setup_venv(DOCS_DIR)
 

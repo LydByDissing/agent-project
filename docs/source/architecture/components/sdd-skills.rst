@@ -112,8 +112,14 @@ skipped; the skill only fills gaps.
 
 **Owns**:
 
-- All files under ``docs/architecture/`` and ``docs/specs/``.
+- All files under ``docs/architecture/``, ``docs/specs/``, and
+  ``docs/design_log/``.
 - Requirement IDs (``REQ-XXX-NNN``) and their six required fields.
+- The design log RST (``docs/source/design_log/FEAT-XXX-RRR.rst``) — written
+  at the end of the docs interview, before the approval gate, tagged with all
+  C4 element ids and requirement ids produced in the session.
+- The design log index (``docs/source/design_log/index.rst``) — appended with
+  each new entry.
 - The approval gate — does not return ``approved`` until the user explicitly
   confirms.
 
@@ -121,6 +127,8 @@ skipped; the skill only fills gaps.
 
 - Create bd task issues (that is Plan's job).
 - Post to GitHub (that is GitHub Bridge's job).
+- Feed design log content back into pipeline context — it is a reference
+  artifact only.
 
 ---
 

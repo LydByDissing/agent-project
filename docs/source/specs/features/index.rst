@@ -5,3 +5,4 @@ Features
    :maxdepth: 1
 
    github-issues
+   design-chat

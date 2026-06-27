@@ -1,3 +1,7 @@
+<!-- [origin ref=llm-dsl-5db req=REQ-DESIGN-CHAT-001,REQ-DESIGN-CHAT-002 c4=sdd_skills/docs_skill]
+  [intent]Docs Skill instruction set; Step 5b implements design log RST authoring (REQ-001) and C4 element tagging (REQ-002).[/intent]
+[/origin] -->
+
 ---
 name: docs
 description: >
@@ -342,6 +346,58 @@ PlantUML is resolved automatically in this order:
 
 The only hard dependency is `java` on PATH. If `java` is missing, the script
 exits with a clear install instruction. No manual plantuml install needed.
+
+---
+
+## Step 5b — Write Design Log
+
+After the interview is complete (all RST written, before build), write the
+design log RST:
+
+**File**: `./docs/source/design_log/FEAT-XXX-<RUN_ID>.rst`
+
+```rst
+FEAT-XXX Design Session — run <RUN_ID>
+=======================================
+
+:Date: <ISO date>
+:Feature: FEAT-XXX
+:Run: <RUN_ID>
+:GitHub Issue: #N  (omit if not from GitHub issue)
+:c4_elements: <space-separated component ids and container ids written this session>
+:Requirements: <space-separated FEAT-XXX and REQ-XXX-NNN ids written this session>
+
+Interview Transcript
+--------------------
+
+**Agent**: <first question asked>
+
+**User**: <user's answer>
+
+**Agent**: <next question>
+
+**User**: <user's answer>
+
+[continue for every Q&A pair in order]
+```
+
+**Tagging rule**: `:c4_elements:` lists every `c4_component` and
+`c4_container` value from requirements written this session, plus container
+and component names from any C4 RST authored this session. `:requirements:`
+lists every FEAT-XXX and REQ-XXX-NNN written this session.
+
+After writing the file, append its name to the toctree in
+`./docs/source/design_log/index.rst`:
+
+```rst
+.. toctree::
+   :maxdepth: 1
+
+   FEAT-XXX-<RUN_ID>
+```
+
+**Purpose**: reference-only. Never feed design log content back into pipeline
+context. It exists so rationale is not lost across resets and sessions.
 
 ---
 

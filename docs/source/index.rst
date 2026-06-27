@@ -17,6 +17,12 @@ agent-project
 
 .. toctree::
    :maxdepth: 1
+   :caption: Design Log
+
+   design_log/index
+
+.. toctree::
+   :maxdepth: 1
    :caption: About
 
    about
