@@ -20,6 +20,7 @@ env/
 # Build artifacts
 build/
 dist/
+docs/_build/
 
 # OS
 .DS_Store

@@ -4,7 +4,7 @@
   "backups": {
     "backup_export": {
       "name": "backup_export",
-      "url": "file:///home/tue/code/ai/llm-dsl/.beads/backup",
+      "url": "file:///home/tue/code/ai/agent-project/.beads/backup",
       "fetch_specs": [
         "refs/heads/*:refs/remotes/backup_export/*"
       ],
