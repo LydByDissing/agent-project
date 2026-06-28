@@ -1,3 +1,7 @@
+# [origin ref=llm-dsl-l3a,llm-dsl-0p1 req=REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
+#   [intent]Shared reference documentation for DSL format, code style, model selection, and testing rules across all SDD pipeline roles[/intent]
+# [/origin]
+
 # SDD Rules — Shared Reference
 
 Read only the sections relevant to your role:
@@ -113,7 +117,7 @@ Comment prefix by language:
 ### Task (plan → worker, stored as bd issue body)
 
 ```
-[task id=<id> type=code|review|test]
+[task id=<id> type=code|review|test|prefactor]
 [req id=<req-id>]
 [c4 component=<name> container=<name>]
 [component]
@@ -130,6 +134,9 @@ Comment prefix by language:
 [out <path>]
 [/task]
 ```
+
+**type field**: Includes new `prefactor` type for scaffolding/infrastructure work that other
+tasks depend on. Prefactor tasks appear first in exec block ordering.
 
 ### Result (worker → conductor, written to bd issue body)
 

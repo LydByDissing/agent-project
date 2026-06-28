@@ -6,3 +6,4 @@ Features
 
    github-issues
    design-chat
+   tracer-bullets

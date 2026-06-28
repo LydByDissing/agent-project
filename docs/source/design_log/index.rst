@@ -20,3 +20,5 @@ context. It exists so the rationale behind decisions is never lost.
    :maxdepth: 1
 
    FEAT-DESIGN-CHAT-0e02b3fb
+   FEAT-TRACER-BULLETS-70c554d6
+   FEAT-TRACER-BULLETS-70c554d6-reset1
