@@ -235,21 +235,26 @@ If plan returns an `[exec]` block:
 
 **Purpose**: execute the plan — spawn workers, run code and tests, collect results.
 
-Spawn the conductor as a sub-agent:
+**Run the conductor inline, in this (main-agent) context. Do NOT spawn it as a
+sub-agent.** The conductor's whole job is to spawn worker sub-agents (coder,
+tester, reviewer) via the Agent tool. Only the main agent can spawn
+sub-agents — a spawned sub-agent has no Agent tool, so a conductor running one
+level down cannot offload any work to the workers. That is the failure mode
+this skill exists to avoid.
 
-```python
-Agent(
-    model="haiku",
-    description="Conductor: FEAT-XXX run RUN_ID",
-    prompt=f"""
-Read skills/conductor/SKILL.md and execute it.
+Invoke the conductor skill inline:
 
-Project directory: {CLAUDE_PROJECT_DIR}
+```
+Read skills/conductor/SKILL.md and execute it here, in the main context.
+
+Project directory: <CLAUDE_PROJECT_DIR>
 Exec block:
-{EXEC_BLOCK}
-""",
-    run_in_background=False
-)
+<EXEC_BLOCK>
+
+The conductor parses the [exec] block, spawns one worker sub-agent per job in
+dependency-ordered waves (via the Agent tool), collects their results, and
+returns a [synthesis] block. It runs in this context so it retains the Agent
+tool needed to spawn workers.
 ```
 
 Read the synthesis block returned by the conductor.
@@ -277,23 +282,21 @@ If `s=partial` or `s=fail`:
 
 **Purpose**: verify the implementation fits the architecture holistically.
 
-Spawn the arch-review as a sub-agent:
+**Run arch-review inline, in this (main-agent) context. Do NOT spawn it as a
+sub-agent.** Arch-review itself spawns a test-quality reviewer sub-agent
+(step 2b) and, on "fix", a coder worker (step 8). Like the conductor, it can
+only do that from the main context where the Agent tool is available.
 
-```python
-Agent(
-    model="sonnet",
-    description="Arch-review: FEAT-XXX run RUN_ID",
-    prompt=f"""
-Read skills/arch-review/SKILL.md and execute it.
+Invoke the arch-review skill inline:
+
+```
+Read skills/arch-review/SKILL.md and execute it here, in the main context.
 
 Inputs:
 - FEAT_ID: FEAT-XXX
-- RUN_ID: {RUN_ID}
-- EPIC_ID: {EPIC_ID}
-- CLAUDE_PROJECT_DIR: {CLAUDE_PROJECT_DIR}
-""",
-    run_in_background=False
-)
+- RUN_ID: <run_id>
+- EPIC_ID: <epic_id>
+- CLAUDE_PROJECT_DIR: <project_dir>
 ```
 
 Read the arch-review result:

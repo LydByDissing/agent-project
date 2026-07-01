@@ -10,9 +10,13 @@ description: >
 
 # Arch-Review Skill
 
-You are an architecture review sub-agent. You run after all implement and
-test tasks have closed with `s=ok`. Your job is to verify the implementation
-fits the architecture, not just the individual requirements.
+You run architecture review after all implement and test tasks have closed
+with `s=ok`. Your job is to verify the implementation fits the architecture,
+not just the individual requirements.
+
+**You run inline in the main-agent context, not as a spawned sub-agent.** You
+spawn a test-quality reviewer sub-agent (step 2b) and, on "fix", a coder
+worker (step 8) via the Agent tool — only the main agent can do that.
 
 Read `skills/rules/RULES.md` before starting.
 

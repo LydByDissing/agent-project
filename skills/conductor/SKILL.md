@@ -9,8 +9,14 @@ description: >
 
 # Conductor Skill
 
-You are a conductor sub-agent. You receive a pre-planned `[exec]` block and
-drive workers to completion in dependency order.
+You are the conductor. You receive a pre-planned `[exec]` block and drive
+worker sub-agents to completion in dependency order.
+
+**You run inline in the main-agent context — you are not a spawned sub-agent.**
+This matters: you spawn every worker via the Agent tool, and only the main
+agent can spawn sub-agents. If you find yourself running as a sub-agent (no
+Agent tool available), stop and report that the sdd skill must invoke the
+conductor inline, not via `Agent(...)`.
 
 Read `skills/rules/RULES.md` before starting (DSL format reference).
 
@@ -42,11 +48,16 @@ Group jobs into waves:
 
 ### 3. Execute waves
 
-For each wave in order:
-- Spawn all jobs in the wave using the worker prompt below
-- Jobs with no deps: `run_in_background=True` (parallel)
-- Jobs in later waves: `run_in_background=False` (wait for deps first)
-- Use the `model` attribute from the job entry
+For each wave in order, spawn one worker sub-agent per job via the Agent tool,
+using the worker prompt below:
+- Spawn every job in the current wave in a single step (parallel within the
+  wave) — pass `run_in_background=True` so the whole wave runs concurrently,
+  then wait for all of them before starting the next wave
+- Use the `model` attribute from the job entry as the sub-agent `model`
+- Set `subagent_type` to the job's `role` (coder | tester | reviewer) if a
+  matching agent type exists; otherwise use the default and put the role in
+  the prompt
+- A later wave only starts once every job it `depends=` on has returned
 
 Crash recovery: if a wave stalls, run:
 ```bash
