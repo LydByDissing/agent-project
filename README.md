@@ -31,8 +31,30 @@ complete.
 | `implement` | conductor | Coder, tester, and reviewer worker behavior |
 | `arch-review` | sdd | Test quality sensors, REQ coverage, C4 boundary, ADR compliance |
 
-`skills/rules/RULES.md` and `skills/rules/TESTING.md` are shared references
-read by the agent skills — not user-invokable.
+`skills/rules/RULES.md`, `skills/rules/TESTING.md`, and
+`skills/rules/CODEGRAPH.md` are shared references read by the agent skills —
+not user-invokable.
+
+## Code intelligence
+
+The plugin ships a [CodeGraph](https://github.com/codegraph-ai/CodeGraph) MCP
+server that starts with every Claude Code session and indexes the project the
+session was opened in — symbols, imports, and call chains, served as
+`codegraph_*` tools. Agents use it to answer structural questions (callers,
+blast radius, related tests, design drift) from resolved graph edges rather
+than text matches. A SessionStart hook tells the session what the graph holds
+and which tool answers which question.
+
+Install once, globally:
+
+```bash
+npm install -g @astudioplus/codegraph-mcp
+```
+
+Without it the plugin still works: the MCP server serves zero tools and agents
+fall back to Grep/Read. Per-project settings — index scope, excludes, tool
+profile, on/off — live in `<project>/.claude/codegraph.json`; see
+`skills/rules/CODEGRAPH.md` for the full key list.
 
 ## State
 

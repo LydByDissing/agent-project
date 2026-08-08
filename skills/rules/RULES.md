@@ -15,6 +15,9 @@ Read only the sections relevant to your role:
 | plan | DSL → Task format, Model Selection, bd Commands |
 | arch-review | DSL → Result format, [origin] Header, bd Commands |
 
+Every role also reads `skills/rules/CODEGRAPH.md` — how to query the project's
+code graph instead of grepping for structural facts.
+
 ---
 
 ## Test Requirements

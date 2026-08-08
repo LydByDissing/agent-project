@@ -1,10 +1,12 @@
 {
   "name": "agent-project",
-  "description": "Spec-Driven Development (SDD) plugin. Autonomous multi-agent pipeline: docs → plan → implement → arch-review. Driven by sphinx-needs requirements and C4 architecture diagrams. Uses bd (beads) for issue tracking and agent coordination.",
+  "description": "Spec-Driven Development (SDD) plugin. Autonomous multi-agent pipeline: docs → plan → implement → arch-review. Driven by sphinx-needs requirements and C4 architecture diagrams. Uses bd (beads) for issue tracking and agent coordination. Ships a per-project CodeGraph MCP server for code intelligence.",
   "author": {
     "name": "Tue Dissing",
     "email": "tue@somersault.dk"
   },
   "license": "Apache-2.0",
-  "version": "2.1.1"
+  "version": "2.2.0",
+  "mcpServers": "./mcp-servers.json",
+  "hooks": "./hooks/hooks.json"
 }
