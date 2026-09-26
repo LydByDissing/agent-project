@@ -360,7 +360,7 @@ Example Feature
 .. note::
 
    This is an example. Replace with real feature content.
-   Copy this file to ``docs/specs/features/<feature-name>.rst``.
+   Copy this file to ``docs/source/specs/features/<feature-name>.rst``.
 
 .. feat:: Example Feature
    :id: FEAT-EXAMPLE

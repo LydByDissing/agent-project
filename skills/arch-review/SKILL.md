@@ -141,8 +141,8 @@ Info findings go into the summary as info.
 Read the feature's requirements:
 
 ```bash
-grep -rn ".. req::" docs/specs/features/
-grep -rn ":id: REQ" docs/specs/features/
+grep -rn ".. req::" docs/source/specs/features/
+grep -rn ":id: REQ" docs/source/specs/features/
 ```
 
 For each `REQ-XXX-NNN` belonging to `FEAT_ID`:
@@ -195,8 +195,8 @@ boundaries it doesn't own.
 Read all ADRs:
 
 ```bash
-ls docs/specs/adrs/
-cat docs/specs/adrs/adr-*.rst
+ls docs/source/specs/adrs/
+cat docs/source/specs/adrs/adr-*.rst
 ```
 
 For each accepted ADR, check the implementation:
@@ -213,13 +213,13 @@ Flag any deviation as a finding with the ADR ID.
 
 ### L1 — System Context
 
-Read `docs/architecture/context.rst`. Does the implementation introduce any
+Read `docs/source/architecture/context.rst`. Does the implementation introduce any
 new external dependencies not shown in the context diagram? If so: finding
 (context diagram needs updating — likely a new requirement).
 
 ### L2 — Containers
 
-Read `docs/architecture/containers.rst`. Does the new code introduce calls
+Read `docs/source/architecture/containers.rst`. Does the new code introduce calls
 between containers not shown in the container diagram? If so: finding.
 
 ### L3 — Components
@@ -227,7 +227,7 @@ between containers not shown in the container diagram? If so: finding.
 For each C4 component touched by this feature:
 
 ```bash
-cat docs/architecture/components/<component>.rst
+cat docs/source/architecture/components/<component>.rst
 ```
 
 Compare the component description (responsibility, patterns, ownership)
@@ -307,7 +307,7 @@ re-run steps 2–5 for the affected findings. Re-present the summary.
 Write a reset signal to the epic:
 
 ```bash
-bd epic update $EPIC_ID --label "phase=reset" \
+bd label add $EPIC_ID "phase=reset" \
   --body "arch-review: reset triggered. Finding: <description>"
 ```
 
@@ -321,10 +321,10 @@ After user approval with no outstanding major/critical findings:
 
 ```bash
 # Close the epic
-bd epic close $EPIC_ID
+bd close $EPIC_ID
 
 # Update all feature requirements to status=implemented
-# (update the RST files in docs/specs/features/)
+# (update the RST files in docs/source/specs/features/)
 ```
 
 Report to sdd:

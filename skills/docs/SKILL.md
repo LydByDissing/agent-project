@@ -81,7 +81,7 @@ What do you need to document?
   7. ArchiMate view         — enterprise landscape
 ```
 
-Read all existing `./docs/architecture/*.rst` and `./docs/specs/**/*.rst`
+Read all existing `./docs/source/architecture/*.rst` and `./docs/source/specs/**/*.rst`
 before asking — do not re-ask questions already captured.
 
 ---
@@ -245,7 +245,7 @@ SHOW_LEGEND()
 @enduml
 ```
 
-RST page: `./docs/architecture/context.rst` — include the rendered SVG.
+RST page: `./docs/source/architecture/context.rst` — include the rendered SVG.
 
 ### C4 — Containers
 

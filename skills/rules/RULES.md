@@ -33,7 +33,7 @@ Every feature MUST have tests. No exceptions.
 | UI component | Component tests | per project ADR |
 
 **Framework selection**: ask the user once per project. Record the decision in
-`docs/specs/adrs/` as an ADR before any test work begins. Do not ask again once
+`docs/source/specs/adrs/` as an ADR before any test work begins. Do not ask again once
 an ADR exists for testing.
 
 Never mock the database in integration tests. Mocked tests have historically
@@ -243,8 +243,27 @@ tasks depend on. Prefactor tasks appear first in exec block ordering.
 [/result]
 ```
 
-`[new-req]` is a reset signal. When present, `sdd` bounces the entire pipeline
-back to the docs phase. Never work around a missing requirement — surface it.
+`[new-req]` carries a **severity**, because not every discovered requirement
+justifies resetting the pipeline:
+
+```
+[new-req sev=blocks-milestone]<description>[/new-req]   → sdd resets to docs now
+[new-req sev=blocks-slice]<description>[/new-req]       → this slice stops; siblings continue
+[new-req sev=noted]<description>[/new-req]              → record and continue
+```
+
+- `blocks-milestone` — the feature cannot be correct without it. Reset to docs.
+- `blocks-slice` — this task cannot finish, but other work is unaffected. The
+  conductor records it, leaves the issue open, and continues the remaining waves.
+- `noted` — a real gap that does not prevent the current work being correct.
+  Amend the docs, file a tracked issue, carry on.
+
+Absent severity means `blocks-milestone`, so an unqualified `[new-req]` is still
+a full reset.
+
+**In every case: never work around a missing requirement.** Surface it. A worker
+that quietly invents the missing behaviour is worse than one that stops, because
+the invention becomes an unrecorded decision nobody reviews.
 
 ### Exec (plan → conductor)
 
@@ -282,14 +301,31 @@ back to the docs phase. Never work around a missing requirement — surface it.
 
 ## Common bd Commands
 
+**Verify these against `bd --help` before relying on them — the CLI has changed
+shape before and the failure messages are misleading.** Known gotchas:
+
+- **One label per `bd label add` call.** Extra positional arguments are parsed as
+  *issue IDs*, so a multi-label call fails with
+  `Error resolving phase=docs: no issue found matching "phase=docs"` — which
+  looks like a missing issue, not a syntax error.
+- **Labels are additive.** Changing a value means `bd label remove <id> "phase=docs"`
+  then `bd label add <id> "phase=plan"`. Adding alone leaves both, and later reads
+  see whichever comes first.
+- **`bd close` on an issue with open blockers silently no-ops.** It reports
+  `cannot close … blocked by open issues [<id>] (use --force to override)` and
+  returns non-zero — easy to miss in a loop that discards output. Use `--force`
+  only for genuinely superseded work.
+- **`bd init --prefix <p>` is required first.** Without it commands fail without
+  saying the database is missing.
+
 ```bash
 bd show <id>                                   # Read issue + body + acceptance criteria
 bd list --label "feat=FEAT-XXX"                # All issues for a feature
 bd list --label "run=$RUN_ID" --status open    # Stalled issues in a run
 bd ready                                       # Unblocked issues
 bd blocked                                     # Blocked issues
-bd dep add <child> --depends-on <parent>
+bd dep add <child> <parent>
 bd close <id>
-bd epic create "<title>"                       # Create SDD run epic
-bd epic show <id>                              # Read epic state
+bd create --type epic "<title>"                       # Create SDD run epic
+bd show <id>                              # Read epic state
 ```
