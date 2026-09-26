@@ -57,25 +57,113 @@ no heuristics in the executor.
 
 ## Code Style
 
-Sub-agents generating code MUST follow these rules. No exceptions.
+Sub-agents generating code MUST follow the section for the language they are
+writing. Apply **one** language section — they conflict with each other by
+design, because they encode different communities' conventions.
 
-### Naming
-- Functions: `snake_case`, abbreviated but inferrable (`val_email` not `validate_email_address`)
+If the project's own `CLAUDE.md` or the surrounding code disagrees with a rule
+here, **the project wins**. Consistency inside a codebase beats consistency with
+this document.
+
+### Language-agnostic
+
+These hold regardless of language:
+
+- **Fail loudly, and name the offending value.** Never return a sentinel that a
+  caller could mistake for a real answer. A zero returned for "no benchmark
+  mapped" reads as "performed exactly in line with the benchmark" — a wrong
+  answer wearing the costume of a right one.
+- **Absent is not zero.** If a value can be genuinely missing, represent that
+  distinctly. Coercing absent to `0`, `""` or `false` destroys information
+  silently and the failure surfaces far from its cause.
+- **Determinism where output is compared, hashed or persisted.** No unordered
+  map iteration, no wall-clock reads below an entry point, no locale-sensitive
+  formatting. Pass time in as a parameter.
+- **Never catch-and-substitute across an abstraction boundary.** A failed call
+  to one implementation must not silently become another's answer.
+
+### Python
+
+- Functions: `snake_case`, abbreviated but inferrable (`val_email` not
+  `validate_email_address`)
 - Classes: `PascalCase`, abbreviated (`EmailVal` not `EmailValidator`)
 - Local variables: Go-style short (`n`, `r`, `buf`, `err`, `ok`, `fn`, `val`, `idx`)
-
-### Comments
-- No docstrings. Ever.
-- No inline comments.
-- Type hints on public functions only. Not on private helpers or local variables.
-
-### Formatting
-- No blank lines between class methods.
-- Single blank line between top-level functions.
+- No docstrings. Ever. No inline comments.
+- Type hints on public functions only. Not on private helpers or locals.
+- No blank lines between class methods; single blank line between top-level
+  functions.
 - f-strings only for string interpolation.
 - List/dict comprehensions instead of explicit loops for single-line operations.
 - Use `...` not `pass` in stubs or abstract methods.
-- No blank lines between import groups (stdlib, third-party, local all contiguous).
+- No blank lines between import groups (stdlib, third-party, local contiguous).
+
+### Java
+
+Do **not** apply the Python naming or comment rules to Java. They fight the
+language and the tooling.
+
+**Naming** — standard Java, no exceptions:
+- Types `PascalCase`, methods and fields `camelCase`, constants
+  `UPPER_SNAKE_CASE`, packages lowercase single words.
+- Abbreviate only where the short form is unambiguous in context. Locals may be
+  short (`n`, `buf`, `ok`); fields and methods may not.
+- One top-level type per file, and the filename must match the public type
+  exactly — the compiler requires it, and `foo_barTest.java` holding
+  `foo_barTest` is a defect even though it compiles.
+
+**Types and immutability**
+- `record` for immutable value objects; `sealed interface` plus records for a
+  closed hierarchy.
+- Defensive-copy collections on the way in (`List.copyOf`, `Map.copyOf`).
+- `Optional<T>` for genuinely absent values. Never coerce an empty Optional to a
+  sentinel on the way into storage or serialisation.
+- `BigDecimal` for money, prices and anything aggregated — never `double`.
+  Always set scale and `RoundingMode` explicitly; never rely on default
+  `toString` of a floating-point type.
+
+**Documentation** — this overrides the Python "no docstrings" rule:
+- Javadoc on public types and methods whose contract is not obvious from the
+  signature. Javadoc is the Java convention and the tooling reads it.
+- No narrating comments restating the code. Comment the non-obvious *why*.
+- Keep the `[inv]` line in the `[origin]` header falsifiable and true — a
+  reviewer may test it by deliberately breaking the invariant.
+
+**Errors**
+- Throw a *named* domain exception when a caller may need to distinguish causes;
+  a bare `RuntimeException` forces callers to string-match.
+- Distinguish transient transport failures from genuine domain failures. Folding
+  them together corrupts any dataset that records outcomes.
+
+**Spring**
+- Constructor injection only. No field or setter injection.
+- Group configuration into `@ConfigurationProperties` records rather than
+  scattering `@Value`. **Exactly one place may define the default for a given
+  setting** — two defaults for one value will drift, and the one that loses is
+  invisible.
+- Enforce invariants that must hold regardless of call path with lifecycle
+  callbacks (e.g. `@PreUpdate`) rather than only in the service layer, which
+  callers can bypass.
+
+**Formatting**
+- Four-space indent, no tabs. Follow the surrounding file.
+- No wildcard imports. Static imports only for test assertions.
+
+**Testing (JUnit 5 + Surefire)**
+- Name tests `test_<what>_<condition>_<expected_outcome>`.
+- Arrange / Act / Assert. One behaviour per test.
+- Assert **exact expected values**. Never assert merely non-null.
+- **Assert a collection is non-empty before asserting a property over its
+  elements.** A `for` loop over an empty list passes every assertion inside it
+  and verifies nothing — this is the single most common way a green suite hides
+  a broken component.
+- Never mock the database, or an external API you can actually reach. Use the
+  real store and a real test/paper endpoint.
+- Never disable, skip or exclude a failing test to obtain a green build, and
+  never weaken an assertion to make one pass. A build that is green because a
+  test was excluded is not green.
+- Where a test enforces a boundary or a guard, add a **positive control** that
+  proves the check can actually fire. A scan that matches nothing passes
+  silently and forever.
 
 ---
 
