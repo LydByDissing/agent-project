@@ -55,24 +55,24 @@ If errors: report them, ask user to fix docs, do not proceed.
 ### 1b. Feature exists in docs
 
 ```bash
-grep -r "FEAT_ID" docs/specs/features/
+grep -r "FEAT_ID" docs/source/specs/features/
 ```
 
 If not found: report gap. Signal sdd to run the docs skill.
 
 ### 1c. C4 L1 exists
 
-`docs/architecture/context.rst` must exist and not be in draft status
+`docs/source/architecture/context.rst` must exist and not be in draft status
 (must not contain `Status: draft`).
 
 ### 1d. C4 L2 exists
 
-`docs/architecture/containers.rst` must exist and not be in draft status.
+`docs/source/architecture/containers.rst` must exist and not be in draft status.
 
 ### 1e. C4 L3 exists for each component referenced by this feature
 
 For each `c4_component` value found in the feature's requirements:
-- Check `docs/architecture/components/<c4_component>.rst` exists
+- Check `docs/source/architecture/components/<c4_component>.rst` exists
 - Check it is not in draft status
 
 ### 1f. Every requirement in the feature has all required fields
@@ -106,7 +106,7 @@ This context drives the decomposition strategy in Step 3.
 
 ### 2b. Read all requirements for the feature
 
-Parse `docs/specs/features/<feature-name>.rst`. Collect for each `.. req::`:
+Parse `docs/source/specs/features/<feature-name>.rst`. Collect for each `.. req::`:
 - `id` — REQ-XXX-NNN
 - `rationale` → becomes `[why]`
 - `acceptance` → becomes `[accept]`
@@ -120,7 +120,7 @@ Parse `docs/specs/features/<feature-name>.rst`. Collect for each `.. req::`:
 For each unique `c4_component` referenced:
 
 ```bash
-cat docs/architecture/components/<c4_component>.rst
+cat docs/source/architecture/components/<c4_component>.rst
 ```
 
 Extract the component narrative (responsibility, patterns, ownership, interfaces).
@@ -142,13 +142,13 @@ For each unique `c4_component` and `c4_container` touched by this feature,
 find ADRs whose `:c4_scope:` includes that component/container id or `system`:
 
 ```bash
-grep -rl ":c4_scope:.*\(system\|<component_id>\|<container_id>\)" docs/specs/adrs/
+grep -rl ":c4_scope:.*\(system\|<component_id>\|<container_id>\)" docs/source/specs/adrs/
 ```
 
 Also always include ADRs scoped to `system` — they apply to everything:
 
 ```bash
-grep -rl ":c4_scope:.*system" docs/specs/adrs/
+grep -rl ":c4_scope:.*system" docs/source/specs/adrs/
 ```
 
 Deduplicate. Record only the matched ADR IDs. These go into the reviewer task
@@ -240,6 +240,39 @@ disjoint `[out]` paths do not need merging — they can run in parallel.
 5. **Parallel execution**: coder tasks with disjoint `[out]` paths and no
    infrastructural dependency can run in parallel — NO `depends=` between them,
    each gets its own independent tester.
+
+6. **Compilation-unit dependency (the hard bound on parallelism).** Disjoint
+   `[out]` paths only imply isolation when the build can verify those files
+   independently. **If two tasks write into the same compilation/verification
+   unit, they are NOT parallel, however disjoint their files.** Chain them with
+   `depends=`.
+
+   A single compilation/verification unit means, for example: one Maven or
+   Gradle module, one Go module, one Rust crate, one .NET project, one Python
+   package whose test suite runs as a whole. In all of these, `mvn verify` /
+   `go test ./...` / `cargo test` / `pytest` compiles or loads **every** file,
+   including a sibling worker's half-written source.
+
+   Why this is not a theoretical concern — observed in a real run of this
+   pipeline, three coders and one tester in one Maven module:
+
+   - the tester compiled a mid-write snapshot of its siblings, returned
+     `s=blocked`, and recommended `git clean -fd` on three directories, which
+     would have destroyed two live workers' output
+   - one coder edited three files belonging to *other* tasks to get its own
+     build green
+   - one coder reported `BUILD SUCCESS` after **excluding the failing test** that
+     blocked it
+   - one shipped a test that looped over a possibly-empty collection and would
+     have passed forever against an empty result
+
+   None of that was worker error. Each had been told to leave the build green
+   over a build it could not isolate, so reaching into siblings' files was the
+   rational move. After serialising, every subsequent task came back clean and
+   workers began *flagging* out-of-scope needs instead of taking them.
+
+   Only split a wave in parallel when each job can be verified alone — separate
+   modules, separate services, or non-code artefacts such as docs.
 
 ### 3f. Order the exec block
 
@@ -357,7 +390,7 @@ BD_TESTER=$(bd create "Tester: <component>" --silent \
 [/task]
 DSL
 )
-bd dep add $BD_TESTER --depends-on $BD_CODER
+bd dep add $BD_TESTER $BD_CODER
 
 BD_REVIEWER=$(bd create "Reviewer: $FEAT_ID" --silent \
   --labels "feat=$FEAT_ID,run=$RUN_ID,phase=implement,agent=reviewer" \
@@ -372,7 +405,7 @@ BD_REVIEWER=$(bd create "Reviewer: $FEAT_ID" --silent \
 DSL
 )
 for BD_CODER_ID in $BD_CODER_IDS; do
-  bd dep add $BD_REVIEWER --depends-on $BD_CODER_ID
+  bd dep add $BD_REVIEWER $BD_CODER_ID
 done
 ```
 

@@ -33,7 +33,7 @@ Every feature MUST have tests. No exceptions.
 | UI component | Component tests | per project ADR |
 
 **Framework selection**: ask the user once per project. Record the decision in
-`docs/specs/adrs/` as an ADR before any test work begins. Do not ask again once
+`docs/source/specs/adrs/` as an ADR before any test work begins. Do not ask again once
 an ADR exists for testing.
 
 Never mock the database in integration tests. Mocked tests have historically
@@ -57,25 +57,113 @@ no heuristics in the executor.
 
 ## Code Style
 
-Sub-agents generating code MUST follow these rules. No exceptions.
+Sub-agents generating code MUST follow the section for the language they are
+writing. Apply **one** language section — they conflict with each other by
+design, because they encode different communities' conventions.
 
-### Naming
-- Functions: `snake_case`, abbreviated but inferrable (`val_email` not `validate_email_address`)
+If the project's own `CLAUDE.md` or the surrounding code disagrees with a rule
+here, **the project wins**. Consistency inside a codebase beats consistency with
+this document.
+
+### Language-agnostic
+
+These hold regardless of language:
+
+- **Fail loudly, and name the offending value.** Never return a sentinel that a
+  caller could mistake for a real answer. A zero returned for "no benchmark
+  mapped" reads as "performed exactly in line with the benchmark" — a wrong
+  answer wearing the costume of a right one.
+- **Absent is not zero.** If a value can be genuinely missing, represent that
+  distinctly. Coercing absent to `0`, `""` or `false` destroys information
+  silently and the failure surfaces far from its cause.
+- **Determinism where output is compared, hashed or persisted.** No unordered
+  map iteration, no wall-clock reads below an entry point, no locale-sensitive
+  formatting. Pass time in as a parameter.
+- **Never catch-and-substitute across an abstraction boundary.** A failed call
+  to one implementation must not silently become another's answer.
+
+### Python
+
+- Functions: `snake_case`, abbreviated but inferrable (`val_email` not
+  `validate_email_address`)
 - Classes: `PascalCase`, abbreviated (`EmailVal` not `EmailValidator`)
 - Local variables: Go-style short (`n`, `r`, `buf`, `err`, `ok`, `fn`, `val`, `idx`)
-
-### Comments
-- No docstrings. Ever.
-- No inline comments.
-- Type hints on public functions only. Not on private helpers or local variables.
-
-### Formatting
-- No blank lines between class methods.
-- Single blank line between top-level functions.
+- No docstrings. Ever. No inline comments.
+- Type hints on public functions only. Not on private helpers or locals.
+- No blank lines between class methods; single blank line between top-level
+  functions.
 - f-strings only for string interpolation.
 - List/dict comprehensions instead of explicit loops for single-line operations.
 - Use `...` not `pass` in stubs or abstract methods.
-- No blank lines between import groups (stdlib, third-party, local all contiguous).
+- No blank lines between import groups (stdlib, third-party, local contiguous).
+
+### Java
+
+Do **not** apply the Python naming or comment rules to Java. They fight the
+language and the tooling.
+
+**Naming** — standard Java, no exceptions:
+- Types `PascalCase`, methods and fields `camelCase`, constants
+  `UPPER_SNAKE_CASE`, packages lowercase single words.
+- Abbreviate only where the short form is unambiguous in context. Locals may be
+  short (`n`, `buf`, `ok`); fields and methods may not.
+- One top-level type per file, and the filename must match the public type
+  exactly — the compiler requires it, and `foo_barTest.java` holding
+  `foo_barTest` is a defect even though it compiles.
+
+**Types and immutability**
+- `record` for immutable value objects; `sealed interface` plus records for a
+  closed hierarchy.
+- Defensive-copy collections on the way in (`List.copyOf`, `Map.copyOf`).
+- `Optional<T>` for genuinely absent values. Never coerce an empty Optional to a
+  sentinel on the way into storage or serialisation.
+- `BigDecimal` for money, prices and anything aggregated — never `double`.
+  Always set scale and `RoundingMode` explicitly; never rely on default
+  `toString` of a floating-point type.
+
+**Documentation** — this overrides the Python "no docstrings" rule:
+- Javadoc on public types and methods whose contract is not obvious from the
+  signature. Javadoc is the Java convention and the tooling reads it.
+- No narrating comments restating the code. Comment the non-obvious *why*.
+- Keep the `[inv]` line in the `[origin]` header falsifiable and true — a
+  reviewer may test it by deliberately breaking the invariant.
+
+**Errors**
+- Throw a *named* domain exception when a caller may need to distinguish causes;
+  a bare `RuntimeException` forces callers to string-match.
+- Distinguish transient transport failures from genuine domain failures. Folding
+  them together corrupts any dataset that records outcomes.
+
+**Spring**
+- Constructor injection only. No field or setter injection.
+- Group configuration into `@ConfigurationProperties` records rather than
+  scattering `@Value`. **Exactly one place may define the default for a given
+  setting** — two defaults for one value will drift, and the one that loses is
+  invisible.
+- Enforce invariants that must hold regardless of call path with lifecycle
+  callbacks (e.g. `@PreUpdate`) rather than only in the service layer, which
+  callers can bypass.
+
+**Formatting**
+- Four-space indent, no tabs. Follow the surrounding file.
+- No wildcard imports. Static imports only for test assertions.
+
+**Testing (JUnit 5 + Surefire)**
+- Name tests `test_<what>_<condition>_<expected_outcome>`.
+- Arrange / Act / Assert. One behaviour per test.
+- Assert **exact expected values**. Never assert merely non-null.
+- **Assert a collection is non-empty before asserting a property over its
+  elements.** A `for` loop over an empty list passes every assertion inside it
+  and verifies nothing — this is the single most common way a green suite hides
+  a broken component.
+- Never mock the database, or an external API you can actually reach. Use the
+  real store and a real test/paper endpoint.
+- Never disable, skip or exclude a failing test to obtain a green build, and
+  never weaken an assertion to make one pass. A build that is green because a
+  test was excluded is not green.
+- Where a test enforces a boundary or a guard, add a **positive control** that
+  proves the check can actually fire. A scan that matches nothing passes
+  silently and forever.
 
 ---
 
@@ -155,8 +243,27 @@ tasks depend on. Prefactor tasks appear first in exec block ordering.
 [/result]
 ```
 
-`[new-req]` is a reset signal. When present, `sdd` bounces the entire pipeline
-back to the docs phase. Never work around a missing requirement — surface it.
+`[new-req]` carries a **severity**, because not every discovered requirement
+justifies resetting the pipeline:
+
+```
+[new-req sev=blocks-milestone]<description>[/new-req]   → sdd resets to docs now
+[new-req sev=blocks-slice]<description>[/new-req]       → this slice stops; siblings continue
+[new-req sev=noted]<description>[/new-req]              → record and continue
+```
+
+- `blocks-milestone` — the feature cannot be correct without it. Reset to docs.
+- `blocks-slice` — this task cannot finish, but other work is unaffected. The
+  conductor records it, leaves the issue open, and continues the remaining waves.
+- `noted` — a real gap that does not prevent the current work being correct.
+  Amend the docs, file a tracked issue, carry on.
+
+Absent severity means `blocks-milestone`, so an unqualified `[new-req]` is still
+a full reset.
+
+**In every case: never work around a missing requirement.** Surface it. A worker
+that quietly invents the missing behaviour is worse than one that stops, because
+the invention becomes an unrecorded decision nobody reviews.
 
 ### Exec (plan → conductor)
 
@@ -194,14 +301,31 @@ back to the docs phase. Never work around a missing requirement — surface it.
 
 ## Common bd Commands
 
+**Verify these against `bd --help` before relying on them — the CLI has changed
+shape before and the failure messages are misleading.** Known gotchas:
+
+- **One label per `bd label add` call.** Extra positional arguments are parsed as
+  *issue IDs*, so a multi-label call fails with
+  `Error resolving phase=docs: no issue found matching "phase=docs"` — which
+  looks like a missing issue, not a syntax error.
+- **Labels are additive.** Changing a value means `bd label remove <id> "phase=docs"`
+  then `bd label add <id> "phase=plan"`. Adding alone leaves both, and later reads
+  see whichever comes first.
+- **`bd close` on an issue with open blockers silently no-ops.** It reports
+  `cannot close … blocked by open issues [<id>] (use --force to override)` and
+  returns non-zero — easy to miss in a loop that discards output. Use `--force`
+  only for genuinely superseded work.
+- **`bd init --prefix <p>` is required first.** Without it commands fail without
+  saying the database is missing.
+
 ```bash
 bd show <id>                                   # Read issue + body + acceptance criteria
 bd list --label "feat=FEAT-XXX"                # All issues for a feature
 bd list --label "run=$RUN_ID" --status open    # Stalled issues in a run
 bd ready                                       # Unblocked issues
 bd blocked                                     # Blocked issues
-bd dep add <child> --depends-on <parent>
+bd dep add <child> <parent>
 bd close <id>
-bd epic create "<title>"                       # Create SDD run epic
-bd epic show <id>                              # Read epic state
+bd create --type epic "<title>"                       # Create SDD run epic
+bd show <id>                              # Read epic state
 ```

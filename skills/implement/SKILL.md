@@ -184,7 +184,7 @@ Read every artifact. Read the feature's requirements from docs to understand
 what the code is supposed to do:
 
 ```bash
-grep -r "<FEAT_ID>" docs/specs/features/
+grep -r "<FEAT_ID>" docs/source/specs/features/
 ```
 
 ### 3. Review against requirements
@@ -200,7 +200,7 @@ For each requirement covered by the coder tasks:
 Read only the ADRs tagged in the task via `[adr ref=ADR-NNN]` entries:
 
 ```bash
-cat docs/specs/adrs/adr-<NNN>-*.rst   # one read per tagged ADR
+cat docs/source/specs/adrs/adr-<NNN>-*.rst   # one read per tagged ADR
 ```
 
 Flag any violation. Do not read the full ADR corpus.

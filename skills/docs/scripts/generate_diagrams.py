@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render all PlantUML source files in docs/architecture/diagrams/ to SVG.
+"""Render all PlantUML source files in docs/source/architecture/diagrams/ to SVG.
 
 Usage (from project root):
     python <skill-path>/scripts/generate_diagrams.py [--docs-dir docs]

@@ -65,18 +65,18 @@ External reference (GitHub issue):
 
 ```bash
 # Create epic
-EPIC_ID=$(bd epic create "SDD: FEAT-XXX — <feature title>")
-bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
+EPIC_ID=$(bd create --type epic "SDD: FEAT-XXX — <feature title>")
+for L in "feat=FEAT-XXX" "phase=docs" "run=$RUN_ID" "reset-count=0"; do bd label add $EPIC_ID "$L"; done   # one label per call
 
 # Create epic with external reference (for GitHub issue integration)
-EPIC_ID=$(bd epic create "SDD: FEAT-XXX — <feature title>" --external-ref gh-N)
-bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
+EPIC_ID=$(bd create --type epic "SDD: FEAT-XXX — <feature title>" --external-ref gh-N)
+for L in "feat=FEAT-XXX" "phase=docs" "run=$RUN_ID" "reset-count=0"; do bd label add $EPIC_ID "$L"; done   # one label per call
 
 # Read current phase
-bd epic show $EPIC_ID | grep "phase="
+bd show $EPIC_ID | grep "phase="
 
 # Advance phase
-bd epic update $EPIC_ID --label "phase=plan"
+bd label add $EPIC_ID "phase=plan"
 ```
 
 ---
@@ -148,11 +148,11 @@ fi
 EPIC_ID=$(bd list --label "feat=FEAT-XXX" --type epic --status open | head -1 | awk '{print $1}')
 
 if [ -z "$EPIC_ID" ]; then
-  EPIC_ID=$(bd epic create $EPIC_CREATE_OPTS "SDD: FEAT-XXX — <feature title>")
-  bd epic update $EPIC_ID --label "feat=FEAT-XXX,phase=docs,run=$RUN_ID,reset-count=0"
+  EPIC_ID=$(bd create --type epic $EPIC_CREATE_OPTS "SDD: FEAT-XXX — <feature title>")
+  for L in "feat=FEAT-XXX" "phase=docs" "run=$RUN_ID" "reset-count=0"; do bd label add $EPIC_ID "$L"; done   # one label per call
 fi
 
-CURRENT_PHASE=$(bd epic show $EPIC_ID | grep -oP "phase=\K[a-z-]+")
+CURRENT_PHASE=$(bd show $EPIC_ID | grep -oP "phase=\K[a-z-]+")
 ```
 
 Resume from `CURRENT_PHASE`. Do not re-run completed phases.
@@ -303,7 +303,7 @@ Read the arch-review result:
 
 If `s=approved`:
 - Update epic: `phase=done`
-- Close epic: `bd epic close $EPIC_ID`
+- Close epic: `bd close $EPIC_ID`
 - Report completion to user
 
 If `s=reset`:

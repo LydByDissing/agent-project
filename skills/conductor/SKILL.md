@@ -46,6 +46,16 @@ Group jobs into waves:
 - **Wave 0**: jobs with no `depends`
 - **Wave N**: jobs whose `depends` are all in waves 0..N-1
 
+**Then collapse any wave whose jobs share a compilation/verification unit.**
+Two jobs writing into the same Maven/Gradle module, Go module, Rust crate,
+.NET project, or Python package with a shared test run are NOT parallel — each
+one's build compiles the other's half-written files. Run them one at a time even
+though the exec block places them in the same wave, and even though their
+`[out]` paths are disjoint. See the plan skill's compilation-unit rule for what
+this costs when ignored.
+
+A wave may only run in parallel when each job can be **verified alone**.
+
 ### 3. Execute waves
 
 For each wave in order, spawn one worker sub-agent per job via the Agent tool,
@@ -66,6 +76,39 @@ bd list --label "run=$RUN_ID" --status open
 Re-spawn the stuck job's worker with the same bd_id — the worker re-reads
 the issue and resumes or writes `s=blocked`.
 
+### 3b. Verify each job independently — do not trust its self-report
+
+`bd show <id>` returns the worker's **own account of its work**. That is evidence
+of intent, not of outcome. In a real run of this pipeline, self-reports included
+a `BUILD SUCCESS` obtained by excluding the failing test, a task claiming its
+acceptance criterion was met with **zero tests written**, and two workers
+asserting directly contradictory things about the same test.
+
+After each job closes, before starting anything that depends on it:
+
+1. **Re-run the project's full verification yourself** (`mvn verify`,
+   `pytest`, `cargo test`, …) and compare the real counts against the reported
+   ones. This alone catches a green-by-exclusion build.
+2. **Check scope independently.** Confirm the job touched only its `[out]` paths,
+   using a diff, `git status`, or file modification times — not the worker's
+   claim. If the tree is untracked, mtimes are enough.
+3. **Attack the guarantee.** For any job whose acceptance criterion rests on an
+   invariant — a boundary, an append-only rule, a determinism or equivalence
+   property — deliberately introduce the failure it claims to prevent, confirm
+   the test fails, then revert. A two-line sabotage and one test run.
+
+   This is the highest-value check available and it is cheap. In one run it was
+   applied five times: four guarantees held, and the fifth exposed a real
+   data-loss defect that every reported test had missed.
+
+   Watch specifically for tests that **cannot fail**: a loop asserting a property
+   over a collection that may be empty, a boundary scan that matches nothing, or
+   a constant that happens to satisfy the assertion. A suite can be entirely
+   green and verify nothing.
+
+If verification contradicts the report, reopen the issue, record what you found,
+and treat the job as unfinished regardless of what it claimed.
+
 ### 4. Check for reset signals
 
 After each job completes, read its result:
@@ -73,9 +116,20 @@ After each job completes, read its result:
 bd show <id>
 ```
 
-If the result contains `[new-req]`, stop spawning further waves immediately.
-Build a partial synthesis with `s=reset` and include all `[new-req]` entries.
-Return it to the caller (sdd). Do not close remaining open issues.
+If the result contains `[new-req]`, act on its **severity** (see RULES.md):
+
+- `sev=blocks-milestone`, or no severity given — stop spawning further waves
+  immediately. Build a partial synthesis with `s=reset`, include all `[new-req]`
+  entries, and return it to `sdd`. Do not close remaining open issues.
+- `sev=blocks-slice` — leave that issue open, record the requirement, and
+  continue the remaining waves. Report it in the synthesis but do not reset.
+- `sev=noted` — record it and continue. Surface it in the synthesis so the
+  requirement reaches the docs, but neither stop nor reset.
+
+Resetting the whole pipeline for every discovered requirement is paralysing: a
+single milestone can legitimately surface several. Recording the gap, amending
+the docs and filing a tracked issue keeps the specification honest without
+discarding work that is already correct.
 
 ### 5. Collect results and build synthesis
 
