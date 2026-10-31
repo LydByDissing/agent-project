@@ -329,3 +329,88 @@ bd close <id>
 bd create --type epic "<title>"                       # Create SDD run epic
 bd show <id>                              # Read epic state
 ```
+
+---
+
+## Before researching: read the project's own record
+
+Projects that have run this pipeline for a while accumulate settled, sourced answers in-repo —
+requirements with dated amendments recording what was tried and rejected, ADRs with their
+alternatives, reference docs of external findings, a design log of measurements, frozen policy
+files, and bd issues with full `[why]` blocks.
+
+**Search those before a web search or a question to the user.** Re-deriving an answer that is
+already written down wastes effort and can reach a *different* answer than the record, which leaves
+the project holding two contradicting truths. Observed both ways in one feature: an instrument was
+catalogued because a probe happened to verify it, while the frozen policy file **explicitly rejected
+that instrument in writing**; and elsewhere, every figure needed for a cost comparison was already
+in a reference doc.
+
+**If the record and a new finding disagree, that disagreement IS the finding.** Surface it rather
+than silently preferring one.
+
+## Parallelism is bounded by the build, not by the files
+
+**Disjoint `[out]` paths do not imply isolation.** If two tasks write into the same
+compilation/verification unit — one Maven/Gradle module, one Go module, one crate, one package whose
+suite runs as a whole — a build compiles *every* file, including a sibling's half-written source.
+Chain them, or isolate them properly.
+
+**Isolated worktrees are the way to parallelise a single module**, and they have preconditions:
+
+- **Commit first.** A worktree branches from a commit, so uncommitted work is invisible to every
+  sibling. Ask before committing if the repo profile is conservative.
+- **Serialise the builds with a shared lock** (`flock` on one lockfile) even though the coding runs
+  in parallel. The thinking is the slow part; the build is minutes.
+- **RAM, not disk, is usually the limit** once the test tier starts containers. Count it: *n* ×
+  (container + JVM) against what is actually free, and measure rather than assume.
+- **Assign migration/sequence numbers up front.** "Take the next free one" collides as soon as two
+  workers run at once, and the collision surfaces as a confusing build failure later.
+- **Tell each worker which files it owns**, and require it to report every file it touched so
+  conflicts can be predicted rather than discovered.
+- **Workers cannot see each other.** When a slice lands that changes a sibling's premise, message the
+  sibling — it branched before the change existed.
+
+**Merging: the conflicts are informative.** In one seven-slice run there were two, both predicted.
+Resolving by stripping conflict markers is only safe when the boundary falls **between**
+declarations; when it falls inside a method body it swallows a brace. Prefer rebuilding the file
+from both parents at a shared anchor.
+
+**An invariant one slice adds can catch what another adds, with no textual conflict.** That is the
+system working. The fix is usually a *stronger* invariant rather than a looser one — when a guard
+asserting "the set is exactly these six" meets a legitimate seventh, the answer is to require every
+member to be **classified**, not to extend the list.
+
+## Who owns a figure's flow, not just its shape
+
+The most repeated defect in one feature — **five times** — was *a figure the caller supplies and
+nothing derives*: a report's commission, the engine's own cash balance, a sleeve's state, an equity
+curve, an allocation's inputs. Each time a requirement owned the figure's **shape** (it must be
+stated, never defaulted; zero only explicitly) and **nobody owned its flow**. Both halves were
+specified, each passed its own review, and the slice that would have joined them was never written.
+
+**When a requirement constrains a value, ask who computes it.** A per-component decomposition
+reviews each box against its requirement; it has no step that asks whether anything *calls* the box.
+Grep for callers of the thing you just built.
+
+## Absent is not zero, and it has variants
+
+Each of these was a real defect:
+
+- absent is not **zero** (a coerced empty confidence; an unreadable cash balance read as 0.00)
+- absent is not **a rate** (no published FX rate on a holiday → fail, never substitute a nearby day)
+- absent is not **free** (an undetermined fee priced at nothing)
+- **pending** is not **missing** (a basis awaiting a rate that is not published until tomorrow is a
+  normal temporary state, and must be distinguishable from one that will never arrive)
+- a **unit** that lives only in a label is absent from the type. Two external sources in one project
+  quoted figures whose unit appeared only in prose — a bond at "93.13" meaning *percent of nominal*,
+  and an FX rate at "671.48" meaning *DKK per 100 units*. Both would have been silently **100× out**.
+  Put the unit in the type and make a value without one unrepresentable.
+
+## Report what you could not fill
+
+A worker that cannot honestly supply a value must **name it as a request**, not invent it. The
+strongest reports in one run were the ones that said *"I did not wire this, because wiring it would
+have meant inventing a rate the requirement forbids inventing"* and listed every field left unserved.
+A slice that stops at the edge of its knowledge and says where the edge is costs one follow-up; one
+that guesses costs a defect nobody is looking for.

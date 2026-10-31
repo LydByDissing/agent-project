@@ -206,3 +206,83 @@ If an acceptance criterion has no test: the task is not done.
 
 - `skills/arch-review/scripts/lint_tests.py` — static sensor
 - `skills/rules/RULES.md` — code style and model selection
+
+---
+
+## Mutation checking — the only evidence an assertion is live
+
+A green suite cannot distinguish *"the boundary held"* from *"the boundary was never reached"*.
+Inspection cannot either: a test that names a boundary looks identical to one that exercises it.
+**Break the production code on purpose and count which tests fail.**
+
+```
+1. apply one mutation that violates the rule the test claims to enforce
+2. run the suite; record WHICH tests failed and HOW MANY
+3. revert, and verify the tree is byte-identical to the green one
+4. report the counts
+```
+
+**A mutation that breaks only ONE test is a warning, not a pass.** In one run of this pipeline it
+meant the test was passing for the wrong reason four separate times:
+
+- `preflight` moved after a write broke 1 test — because the stub refused every *read* too, so the
+  mutated run stopped before the write anyway. **The fence was passing, not the ordering.**
+- A reconcile guard removed broke 1 test — because the caller reconciled first, so the divergence
+  never reached the code under test. The case that mattered had **no test at all**.
+- A sleeve-ordering mutation broke 1 test — because that test's expected state *happened to equal*
+  the enum order, so it could not tell "follows the report" from "iterates the enum".
+- By contrast, swapping two ordered operations broke **23 tests in 3 classes**. That is what a live
+  assertion looks like beside a decorative one.
+
+**Restoring is part of the technique and it fails silently.** A copy that preserves mtime lets the
+build reuse the *mutated* class file, so the next run tests the mutation and reports it as a real
+failure. Touch the file, or clean. Equally: a renamed resource leaves the old copy in the build
+output, and the classpath — not the source tree — is what runs.
+
+## A positive control must exercise the thing under test
+
+A control built from the same constant as the check tests **the constant, not the check**:
+
+```java
+// WORTHLESS: never calls the scan it guards
+String sample = "package x;\n" + FORBIDDEN_IMPORT + "Y;";
+assertTrue(sample.contains(FORBIDDEN_IMPORT));
+
+// REAL: plants files on disk and runs the actual scan
+Files.writeString(tmp.resolve("Bad.java"), "package x;\n" + FORBIDDEN_IMPORT + "Y;");
+assertEquals(List.of(planted.toString()), offendersAmong(javaFilesUnder(tmp)));
+```
+
+The first form was written *by the author who had spent that same session reporting this exact
+defect in other people's code*. Knowing the rule does not protect you, because a broken control
+looks exactly like a control.
+
+**A rule asserting an absence proves nothing until it has been shown to bite on a presence.** If a
+test says "no write route exists" or "no secret appears in the output", it needs a planted write
+route and a planted secret.
+
+## Boundaries: adjacent, and different on each side
+
+- Put the value **adjacent** to the threshold (±1 in the smallest unit the type carries). A 10-day
+  limit tested with 20 and 60 would have passed for any limit from 1 to 19.
+- Assert the two sides are **different**, not both equal to the same number. A commission floor
+  asserted at 22.00 on *both* sides of its crossover is also exactly what a floor-only
+  implementation returns — the percentage leg was untested by a test that appeared to test it.
+- Where a statute or spec says "exceeds", the boundary is one unit wide. Assert the exact value is
+  *below*, and mutate `>` to `>=` to prove the test notices.
+
+## Secrets: grep the rendered output, never the code
+
+Reading the code and concluding it looks fine misses the leaks the *language* generates for you.
+Collect every rendered string a component can emit — messages, `toString()`, exception messages
+**and stack traces**, every captured log event — assert the collection's size so a sweep that
+silently stops covering something fails, then grep all of it for planted sentinels. Found this way,
+never by reading:
+
+- a `record` whose component was a bearer token printed it from its **compiler-generated**
+  `toString()`;
+- an "unreadable file" message embedded a parse error, and the parser quotes the offending
+  **source** — which was the credential file.
+
+For container images, scan **per layer**: a file copied and then deleted in a later layer is still
+in the image, and a merged-filesystem check finds nothing there.
