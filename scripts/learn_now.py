@@ -3,6 +3,8 @@
 # [/origin]
 
 import argparse
+import contextlib
+import fcntl
 import http.client
 import json
 import os
@@ -22,6 +24,7 @@ NOW = "now.json"
 GITIGNORE_LINE = ".sdd/"
 DEFAULT_PORT = "4747"
 DEFAULT_WAIT_S = "5"
+LOCK_WAIT_S = 3.0
 
 
 def _err(msg: str) -> None:
@@ -42,6 +45,26 @@ def _wait_s() -> float:
 
 def _now_path(proj: Path) -> Path:
     return proj / SDD_DIR / NOW
+
+
+@contextlib.contextmanager
+def _lock(proj: Path):
+    d = proj / SDD_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    fd = os.open(d, os.O_RDONLY)
+    try:
+        end = time.monotonic() + LOCK_WAIT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    raise TimeoutError(f"could not lock {d} within {LOCK_WAIT_S}s")
+                time.sleep(0.02)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _read_now(proj: Path) -> dict:
@@ -155,40 +178,49 @@ def _open_url(url: str) -> str | None:
     return None
 
 
+def _update(proj: Path, fn) -> None:
+    with _lock(proj):
+        doc = _read_now(proj)
+        fn(doc)
+        _write_now(proj, doc)
+
+
 def _wave(a: argparse.Namespace) -> list[str]:
     proj = Path(a.project).resolve()
     port = _port()
-    doc = _read_now(proj)
-    doc.update(run=a.run, wave=a.wave, jobs=_norm_jobs(json.loads(a.jobs)))
-    doc.setdefault("opened_run", None)
+    jobs = _norm_jobs(json.loads(a.jobs))
     url = f"http://127.0.0.1:{port}/"
-    doc["url"] = url
+
+    def set_wave(doc: dict) -> None:
+        doc.update(run=a.run, wave=a.wave, jobs=jobs, url=url)
+        doc.setdefault("opened_run", None)
+
+    _update(proj, set_wave)
     pid, err = _ensure_server(proj, port)
-    if pid is not None:
-        doc["server_pid"] = pid
     errs = [err] if err else []
-    _write_now(proj, doc)
+    if pid is not None:
+        _update(proj, lambda doc: doc.__setitem__("server_pid", pid))
     _ensure_gitignore(proj)
-    if not err and doc.get("opened_run") != a.run:
+    if not err and _read_now(proj).get("opened_run") != a.run:
         oerr = _open_url(url)
         if oerr:
             errs.append(oerr)
         else:
-            doc["opened_run"] = a.run
-            _write_now(proj, doc)
+            _update(proj, lambda doc: doc.__setitem__("opened_run", a.run))
     return errs
 
 
 def _job(a: argparse.Namespace) -> list[str]:
     proj = Path(a.project).resolve()
-    doc = _read_now(proj)
-    jobs = doc.get("jobs", [])
-    if not any(j["id"] == a.id for j in jobs):
-        return [f"no job {a.id} in {_now_path(proj)}"]
-    for j in jobs:
-        if j["id"] == a.id:
-            j["status"] = a.status
-    _write_now(proj, doc)
+    with _lock(proj):
+        doc = _read_now(proj)
+        jobs = doc.get("jobs", [])
+        if not any(j["id"] == a.id for j in jobs):
+            return [f"no job {a.id} in {_now_path(proj)}"]
+        for j in jobs:
+            if j["id"] == a.id:
+                j["status"] = a.status
+        _write_now(proj, doc)
     return []
 
 
