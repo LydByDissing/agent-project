@@ -86,9 +86,12 @@ Requirements
    :acceptance: Given ``learn/iac/terraform-state/diagrams/state-flow.puml``
        and a lesson body referencing ``diagrams/state-flow.svg``, when the
        plan phase generates or updates the lesson, then the committed SVG
-       sits next to its source. ``learn validate`` fails if a referenced SVG
-       is missing or older than its source. The SPA shows the SVG with
-       zoom and pan.
+       sits next to its source and carries the sha256 of that source in a
+       ``<!-- sdd-source-sha256: <hex> -->`` comment written at render time.
+       ``learn validate`` fails if a referenced SVG is missing, has no such
+       comment, or its hash differs from the current source. File
+       modification times are never used, so a fresh clone validates. The
+       SPA shows the SVG with zoom and pan.
    :non_goal: No diagram rendering in the browser. No interactive diagram
        editing.
    :c4_component: lesson_library
