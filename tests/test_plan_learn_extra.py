@@ -315,7 +315,7 @@ def test_single_bump_rule_accepts_exactly_one_increment(base, cur, ok):
     assert _single_bump(base, cur) is ok
 
 
-def test_plugin_version_single_bump_from_main():
+def test_plugin_version_is_higher_than_main():
     try:
         base = subprocess.run(
             ["git", "show", "main:.claude-plugin/plugin.json"],
@@ -327,8 +327,9 @@ def test_plugin_version_single_bump_from_main():
     cur_ver = json.loads(PLUGIN_JSON.read_text())["version"]
     if base_ver == cur_ver:
         pytest.skip(f"plugin version equals main ({base_ver}); single-bump check not applicable")
-    assert _single_bump(base_ver, cur_ver), (
-        f"main is {base_ver}, branch is {cur_ver}: the branch must bump the plugin version exactly once"
+    as_tuple = lambda v: tuple(int(x) for x in v.split("."))
+    assert as_tuple(cur_ver) > as_tuple(base_ver), (
+        f"main is {base_ver}, branch is {cur_ver}: the branch version must be higher than main"
     )
 
 

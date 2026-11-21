@@ -68,8 +68,13 @@ def bd_create(title: str, body: str, labels: list[str] = None,
 
 
 def bd_update_body(bd_id: str, body: str):
-    """Update an issue's body."""
+    """Replace an issue's description. Not for results: it overwrites the task brief."""
     bd_run("update", bd_id, "--body-file", "-", input_text=body)
+
+
+def bd_append_result(bd_id: str, result: str):
+    """Append a [result] block to the issue notes, keeping the task brief intact."""
+    bd_run("update", bd_id, "--append-notes", result)
 
 
 def bd_close(bd_id: str):
@@ -204,7 +209,7 @@ class BdPipelineRunner:
         if self.dry_run:
             print(f"  [DRY RUN] update {bd_id}")
             return
-        bd_update_body(bd_id, result_body)
+        bd_append_result(bd_id, result_body)
         self.log(f"Updated {bd_id}")
 
     def complete_task(self, bd_id: str):
@@ -218,12 +223,12 @@ class BdPipelineRunner:
     def get_result(self, bd_id: str) -> dict:
         """Get parsed result from an issue. Returns dict with DSL data."""
         info = bd_show(bd_id)
-        body = info.get("description", "")
+        notes = info.get("notes", "") or ""
+        body = notes if "[result" in notes else info.get("description", "")
 
-        # Extract [result] DSL from body
-        idx = body.find("[result")
+        idx = body.rfind("[result")
         if idx != -1:
-            end = body.rfind("[/result]")
+            end = body.find("[/result]", idx)
             if end != -1:
                 dsl = body[idx:end + len("[/result]")]
                 try:
