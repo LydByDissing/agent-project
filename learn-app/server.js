@@ -10002,6 +10002,7 @@ var Hono3 = class extends Hono {
 
 // src/library/load.ts
 var import_yaml2 = __toESM(require_dist(), 1);
+import { createHash } from "node:crypto";
 import { existsSync as existsSync2, readFileSync as readFileSync2, readdirSync, statSync as statSync2 } from "node:fs";
 import { join as join2, relative, resolve, sep } from "node:path";
 
@@ -10156,6 +10157,7 @@ var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var LESSON_FILE = /^(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
 var DIAGRAM_REF = /diagrams\/([A-Za-z0-9_.-]+)\.svg/g;
 var DIAGRAM_SOURCES = ["puml", "d2", "mmd"];
+var SOURCE_STAMP = /<!--\s*sdd-source-sha256:\s*([0-9a-f]{64})\s*-->/;
 function listDirs(dir) {
   return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
 }
@@ -10290,16 +10292,20 @@ function checkDiagram(diagramDir, name) {
   const svg = join2(diagramDir, `${name}.svg`);
   const sources = DIAGRAM_SOURCES.map((ext) => join2(diagramDir, `${name}.${ext}`)).filter((p) => existsSync2(p));
   const svgRel = `diagrams/${name}.svg`;
+  const sourceNames = sources.map((s) => `diagrams/${s.split(sep).pop()}`);
   if (sources.length === 0) {
     return `references ${svgRel}, but no diagrams/${name}.puml, .d2 or .mmd source exists`;
   }
   if (!existsSync2(svg)) {
-    return `references ${svgRel}, which is missing (render it from ${sources.map((s) => `diagrams/${s.split(sep).pop()}`).join(" or ")})`;
+    return `references ${svgRel}, which is missing (render it from ${sourceNames.join(" or ")})`;
   }
-  const svgTime = statSync2(svg).mtimeMs;
-  const newest = sources.reduce((best, s) => statSync2(s).mtimeMs > statSync2(best).mtimeMs ? s : best);
-  if (statSync2(newest).mtimeMs > svgTime) {
-    return `${svgRel} is older than its source diagrams/${newest.split(sep).pop()}; re-render it`;
+  const stamp = SOURCE_STAMP.exec(readFileSync2(svg, "utf8"));
+  if (!stamp) {
+    return `${svgRel} has no sdd-source-sha256 stamp; re-render it from ${sourceNames.join(" or ")}`;
+  }
+  const current = sources.map((s) => createHash("sha256").update(readFileSync2(s)).digest("hex"));
+  if (!current.includes(stamp[1])) {
+    return `${svgRel} is out of date: its sdd-source-sha256 matches no current source (${sourceNames.join(" or ")}); re-render it`;
   }
   return void 0;
 }

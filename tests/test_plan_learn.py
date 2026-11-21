@@ -1,11 +1,13 @@
-# [origin ref=llm-dsl-gu1y.18,llm-dsl-gu1y.13 req=REQ-OPERATOR-EDU-004 c4=sdd_skills/plan_skill]
-#   [intent]Tests that the plan phase tags exec jobs with topics=, documents the lesson-preparation step and validate command, and that generate_diagrams.py --dir renders learn/ diagrams and fails on PlantUML warning banners[/intent]
+# [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.18,llm-dsl-gu1y.13 req=REQ-OPERATOR-EDU-004 c4=sdd_skills/plan_skill]
+#   [intent]Tests that the plan phase tags exec jobs with topics=, documents the lesson-preparation step and validate command, and that generate_diagrams.py --dir renders learn/ diagrams, stamps each SVG with its source sha256 and fails on PlantUML warning banners[/intent]
 #   [inv]--dir exits non-zero whenever a rendered SVG contains a PlantUML warning text node[/inv]
 # [/origin]
 
+import hashlib
 import html
 import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,15 @@ from tests._learn_helpers import (
 )
 
 SEED_SVG = ROOT / "learn" / "backend" / "http-caching" / "diagrams" / "revalidation.svg"
+STAMP = re.compile(r"<!--\s*sdd-source-sha256:\s*([0-9a-f]{64})\s*-->")
+
+
+def _stamps(svg: Path) -> list[str]:
+    return STAMP.findall(svg.read_text())
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 README = ROOT / "README.md"
 GD = load_generate_diagrams()
 
@@ -73,6 +84,32 @@ def test_generate_diagrams_dir_renders_svg_next_to_source(tmp_path):
     svg = diag / "fx_ok.svg"
     assert svg.exists(), r.stdout
     assert "<svg" in svg.read_text()
+
+
+@needs_plantuml
+def test_generate_diagrams_dir_stamps_svg_with_source_sha256(tmp_path):
+    diag = tmp_path / "lesson" / "diagrams"
+    src = write_file(diag / "fx_ok.puml", PUML_OK)
+
+    r = run_diagrams(["--dir", str(tmp_path)])
+
+    assert r.returncode == 0, out(r)
+    svg = src.with_suffix(".svg")
+    assert _stamps(svg) == [_sha256(src)], svg.read_text()[:200]
+    ET.parse(svg)  # the stamp must leave the SVG well-formed
+
+
+@needs_plantuml
+def test_generate_diagrams_dir_restamps_after_source_changes(tmp_path):
+    diag = tmp_path / "lesson" / "diagrams"
+    src = write_file(diag / "fx_ok.puml", PUML_OK)
+    assert run_diagrams(["--dir", str(tmp_path)]).returncode == 0
+    src.write_text(PUML_OK + "\n")
+
+    r = run_diagrams(["--dir", str(tmp_path)])
+
+    assert r.returncode == 0, out(r)
+    assert _stamps(src.with_suffix(".svg")) == [_sha256(src)]
 
 
 @needs_plantuml
