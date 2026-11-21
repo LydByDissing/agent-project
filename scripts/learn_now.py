@@ -69,7 +69,12 @@ def _lock(proj: Path):
 
 def _read_now(proj: Path) -> dict:
     p = _now_path(proj)
-    return json.loads(p.read_text()) if p.exists() else {}
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{p} is not valid JSON ({e})") from None
 
 
 def _write_now(proj: Path, doc: dict) -> None:
@@ -213,7 +218,10 @@ def _wave(a: argparse.Namespace) -> list[str]:
 def _job(a: argparse.Namespace) -> list[str]:
     proj = Path(a.project).resolve()
     with _lock(proj):
-        doc = _read_now(proj)
+        try:
+            doc = _read_now(proj)
+        except ValueError as e:
+            return [f"job {a.id} not recorded: {e}"]
         jobs = doc.get("jobs", [])
         if not any(j["id"] == a.id for j in jobs):
             return [f"no job {a.id} in {_now_path(proj)}"]

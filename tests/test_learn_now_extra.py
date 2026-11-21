@@ -1,12 +1,10 @@
-# [origin ref=llm-dsl-gu1y.12 req=REQ-OPERATOR-EDU-010 c4=sdd_skills/conductor]
+# [origin ref=llm-dsl-gu1y.18,llm-dsl-gu1y.12 req=REQ-OPERATOR-EDU-010 c4=sdd_skills/conductor]
 #   [intent]Audits learn_now.py against the t6 acceptance gaps: never-break job failures, atomic now.json writes, server reuse, once-per-run open, SDD_LEARN=off, .gitignore handling, and a real node server end to end.[/intent]
 # [/origin]
 
 import json
 import os
 import shutil
-import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -16,8 +14,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "scripts" / "learn_now.py"
+from tests._learn_helpers import FAKE_SERVER, LEARN_NOW_SCRIPT, free_port, kill_pid, now_doc, run_learn_now
 
 JOBS = json.dumps(
     [
@@ -27,58 +24,13 @@ JOBS = json.dumps(
     ]
 )
 
-FAKE_SERVER = """
-import http.server, os, threading
-port = int(os.environ["SDD_LEARN_PORT"])
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200 if self.path == "/api/health" else 404)
-        self.end_headers()
-    def log_message(self, *a):
-        pass
-srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
-t = threading.Timer(60, os._exit, (0,))
-t.daemon = True
-t.start()
-srv.serve_forever()
-"""
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _run(args: list[str], env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
 
 def _now_path(proj: Path) -> Path:
     return proj / ".sdd" / "now.json"
 
 
-def _now(proj: Path) -> dict:
-    return json.loads(_now_path(proj).read_text())
-
-
 def _statuses(proj: Path) -> dict:
-    return {j["id"]: j["status"] for j in _now(proj)["jobs"]}
-
-
-def _kill(pid: int | None) -> None:
-    if not pid:
-        return
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    return {j["id"]: j["status"] for j in now_doc(proj)["jobs"]}
 
 
 @pytest.fixture
@@ -91,7 +43,7 @@ def ctx(tmp_path):
     opener.chmod(0o755)
     fake = tmp_path / "fake_server.py"
     fake.write_text(FAKE_SERVER)
-    port = _free_port()
+    port = free_port()
     env = {k: v for k, v in os.environ.items() if not k.startswith("SDD_LEARN")}
     env.update(
         SDD_LEARN_PORT=str(port),
@@ -102,20 +54,20 @@ def ctx(tmp_path):
     state = {"proj": proj, "env": env, "rec": rec, "port": port, "tmp": tmp_path, "opener": opener}
     yield state
     try:
-        _kill(_now(proj).get("server_pid"))
+        kill_pid(now_doc(proj).get("server_pid"))
     except (OSError, ValueError):
         pass
 
 
-def _wave(ctx, run: str = "R1", wave: int = 0, jobs: str = JOBS) -> subprocess.CompletedProcess:
-    return _run(
+def _wave(ctx, run: str = "R1", wave: int = 0, jobs: str = JOBS):
+    return run_learn_now(
         ["wave", "--project", str(ctx["proj"]), "--run", run, "--wave", str(wave), "--jobs", jobs],
         ctx["env"],
     )
 
 
-def _job(ctx, job_id: str, status: str) -> subprocess.CompletedProcess:
-    return _run(
+def _job(ctx, job_id: str, status: str):
+    return run_learn_now(
         ["job", "--project", str(ctx["proj"]), "--id", job_id, "--status", status],
         ctx["env"],
     )
@@ -129,13 +81,14 @@ def test_job_without_now_json_reports_one_stderr_line_and_exits_zero(ctx):
     assert not _now_path(ctx["proj"]).exists(), "job must not invent a now.json it cannot fill"
 
 
-def test_job_with_corrupt_now_json_reports_one_stderr_line_and_exits_zero(ctx):
+def test_job_with_corrupt_now_json_names_the_file_and_exits_zero(ctx):
     (ctx["proj"] / ".sdd").mkdir()
     _now_path(ctx["proj"]).write_text("{not json")
     r = _job(ctx, "llm-y.1", "done")
     assert r.returncode == 0, f"job must never break the conductor, got exit {r.returncode}"
     assert len(r.stderr.strip().splitlines()) == 1
-    assert "JSONDecodeError" in r.stderr
+    assert "now.json" in r.stderr, f"stderr must name the file that failed to parse: {r.stderr!r}"
+    assert "JSONDecodeError" not in r.stderr, f"stderr leaks the exception class: {r.stderr!r}"
 
 
 def test_now_json_always_parses_during_rapid_job_updates(ctx):
@@ -181,7 +134,7 @@ def test_concurrent_job_updates_all_survive(ctx):
         assert _wave(ctx, run=f"R{rnd}", wave=rnd, jobs=jobs).returncode == 0
         procs = [
             subprocess.Popen(
-                [sys.executable, str(SCRIPT), "job", "--project", str(ctx["proj"]), "--id", i, "--status", "done"],
+                [sys.executable, str(LEARN_NOW_SCRIPT), "job", "--project", str(ctx["proj"]), "--id", i, "--status", "done"],
                 env=ctx["env"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -248,25 +201,32 @@ def test_wave_with_default_server_cmd_serves_health_and_is_stopped(tmp_path):
     opener = tmp_path / "opener.sh"
     opener.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{rec}"\n')
     opener.chmod(0o755)
-    port = _free_port()
+    learn_home = tmp_path / "sdd-home"
+    port = free_port()
     env = {k: v for k, v in os.environ.items() if not k.startswith("SDD_LEARN")}
-    env.update(SDD_LEARN_PORT=str(port), SDD_LEARN_OPENER=str(opener), SDD_LEARN_WAIT_S="10")
+    env.update(
+        SDD_LEARN_PORT=str(port),
+        SDD_LEARN_OPENER=str(opener),
+        SDD_LEARN_WAIT_S="10",
+        SDD_LEARN_HOME=str(learn_home),
+    )
     pid = None
     try:
         started = time.monotonic()
-        r = _run(["wave", "--project", str(proj), "--run", "R1", "--wave", "0", "--jobs", JOBS], env)
+        r = run_learn_now(["wave", "--project", str(proj), "--run", "R1", "--wave", "0", "--jobs", JOBS], env)
         elapsed = time.monotonic() - started
         assert r.returncode == 0, r.stderr
         assert r.stderr == "", f"default server start reported: {r.stderr}"
         assert elapsed < 15, f"wave blocked for {elapsed:.1f}s"
-        pid = _now(proj)["server_pid"]
+        assert (learn_home / "learner.json").exists(), "server must write learner.json under SDD_LEARN_HOME, not ~/.sdd"
+        pid = now_doc(proj)["server_pid"]
         assert isinstance(pid, int)
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as resp:
             assert resp.status == 200
             assert json.loads(resp.read()) == {"ok": True}
         assert rec.read_text().splitlines() == [f"http://127.0.0.1:{port}/"]
     finally:
-        _kill(pid)
+        kill_pid(pid)
         deadline = time.monotonic() + 5
         while pid and time.monotonic() < deadline:
             try:
