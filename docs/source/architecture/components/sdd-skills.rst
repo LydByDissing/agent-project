@@ -1,7 +1,7 @@
 SDD Skills — Components
 =======================
 
-The SDD Skills container contains seven components. Each maps to a
+The SDD Skills container contains eight components. Each maps to a
 ``skills/<name>/SKILL.md`` that an LLM agent reads before acting.
 
 .. image:: ../diagrams/components_sdd_skills.svg
@@ -20,8 +20,8 @@ epic, reads the current ``phase=`` label, invokes the appropriate skill for
 each phase, advances the label on success, and increments ``reset-count``
 on resets.
 
-**Patterns**: State machine over ``phase`` enum (docs → plan → implement →
-arch-review → done). All state is externalised to the bd epic label — the
+**Patterns**: State machine over ``phase`` enum (docs → security-design →
+plan → implement → arch-review → security-review → done). All state is externalised to the bd epic label — the
 orchestrator is stateless between invocations.
 
 **Owns**:
@@ -40,8 +40,8 @@ orchestrator is stateless between invocations.
 
 **Interfaces**:
 
-- Calls: GitHub Bridge (fetch + update), Docs Skill, Plan Skill, Conductor,
-  Arch-Review, bd CLI.
+- Calls: GitHub Bridge (fetch + update), Docs Skill, Security Review, Plan
+  Skill, Conductor, Arch-Review, bd CLI.
 - Returns: terminal report to developer on ``phase=done``.
 
 ---
@@ -224,3 +224,34 @@ findings. The user sees findings before approving.
 **Does NOT**:
 
 - Fix code. Surfaces findings and lets the pipeline reset if needed.
+
+---
+
+Security Review
+~~~~~~~~~~~~~~~
+
+**Responsibility**: Security analysis at two points in the pipeline. In the
+``security-design`` phase (after docs approval, before plan) it builds or
+updates a STRIDE threat model for every new or changed container and trust
+boundary in the run's docs. In the ``security-review`` phase (after
+arch-review approval) it checks the run's code against OWASP ASVS / Top 10
+concerns and verifies that each threat's mitigation is implemented and
+covered by a test that fails without it (FEAT-SECURITY-REVIEW, ADR-005).
+
+**Patterns**: Read docs or diff → analyse → write threat model → operator
+gate per finding. Runs inline in the main context so that, on "fix", it can
+create a coder bd issue and spawn a worker, like Arch-Review. Runs on Opus.
+
+**Owns**:
+
+- ``docs/source/security/threat-model/<container>.rst`` (``threat`` needs)
+  and ``docs/source/security/accepted-risks.rst`` (``risk`` needs).
+- The ``[security]`` result block on the epic notes.
+- The design-time gate (add requirement → reset to docs, accept risk, note)
+  and the post-implementation gate (fix, accept risk, revise docs).
+
+**Does NOT**:
+
+- Edit code. Fixes go through a coder worker.
+- Reset the pipeline on its own. Only an operator choice resets.
+- Run scanners or audit dependencies.

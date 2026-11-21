@@ -11,3 +11,4 @@ and what alternatives were rejected.
    adr-002-learn-app-node-vite-hono
    adr-003-live-questions-via-claude-cli
    adr-004-prerendered-lesson-diagrams
+   adr-005-security-review-method

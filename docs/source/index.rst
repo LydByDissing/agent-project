@@ -16,6 +16,12 @@ agent-project
    specs/index
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Security
+
+   security/index
+
+.. toctree::
    :maxdepth: 1
    :caption: Design Log
 

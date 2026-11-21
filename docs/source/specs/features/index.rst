@@ -8,3 +8,4 @@ Features
    design-chat
    tracer-bullets
    operator-edu
+   security-review
