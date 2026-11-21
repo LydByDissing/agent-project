@@ -31,6 +31,12 @@ a fixed Leitner table (boxes 0–5, intervals 0/1/2/4/8/16 days).
 its writes: re-read, merge, write temp file, rename. Several learn servers
 (one per project) may share the file.
 
+Accepts only requests whose ``Host`` (and ``Origin``, when present) is
+``127.0.0.1:<port>`` or ``localhost:<port>``, and only ``application/json``
+bodies on writes. This stops other web pages in the operator's browser from
+triggering ``claude -p`` runs or changing learner state (cross-site requests,
+DNS rebinding).
+
 **Does NOT**: Write ``now.json`` (the Conductor does), generate lessons
 (the Plan Skill does), or listen on any interface but loopback.
 
@@ -42,6 +48,9 @@ view (Markdown, SVG diagrams with zoom and pan, sources section), a quiz view
 (options, then a per-option explanation and source after answering), a wave
 progress strip that polls ``/api/now`` every 2 s, and a settings view for
 interest.
+
+Fonts are bundled in ``dist/``; the SPA makes no requests outside the
+local server.
 
 **Does NOT**: Touch the filesystem or call Claude. Everything goes through
 the server API.

@@ -170,7 +170,9 @@ Requirements
        choices. Given a lesson on screen, when the operator clicks "not for
        me", then that topic's interest becomes ``skip`` and the next lesson
        is selected. A topic-level setting overrides its domain-level
-       setting.
+       setting. Given a topic with its own setting, when the operator picks
+       "inherit" in settings, then the topic's entry is removed from
+       ``interest`` and the topic follows its domain again.
    :non_goal: Does not infer interest from behaviour. Interest changes only
        when the operator sets it.
    :c4_component: learn_spa
@@ -179,7 +181,8 @@ Requirements
    The system shall ask for the operator's interest per domain on first use,
    offer "more like this / basics are enough / not for me" controls on
    every lesson, and provide a settings view to change any domain or topic
-   interest later.
+   interest later, including clearing a topic's own setting so it inherits
+   from its domain.
 
 .. req:: On-topic lesson selection weighted by interest and mastery
    :id: REQ-OPERATOR-EDU-007

@@ -84,3 +84,12 @@ Design Decisions
 - **Defaults chosen by the agent** (open to change): port 4747, Leitner
   intervals 0/1/2/4/8/16 days, 3 questions per quiz, ``SDD_LEARN=off`` to
   disable, and committed SPA build so operators need only ``node``.
+
+Arch-review Decisions
+---------------------
+
+- **Fix scope**: fix every arch-review finding in this run (security guard,
+  test hygiene, missing behaviour tests, duplicate tests, doc-contract tests).
+- **Fonts**: bundle fonts locally; the SPA makes no outside requests.
+- **Inherit**: topic interest can be cleared back to inherit from its domain
+  (REQ-OPERATOR-EDU-006 amended).
