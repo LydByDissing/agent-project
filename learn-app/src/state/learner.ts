@@ -1,8 +1,8 @@
-// [origin ref=llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Owns ~/.sdd/learner.json: creates it, refuses unknown schemas, and applies updates under a lock with re-read, merge, temp write and rename.[/intent]
 //   [inv]update() never loses a concurrent writer's change: read-modify-write runs only while holding learner.json.lock.[/inv]
 // [/origin]
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,8 @@ export interface HistoryEntry {
   chosen: number;
   correct: number;
   at: string;
+  explanation?: string;
+  source?: string;
 }
 
 export interface Learner {
@@ -73,6 +75,33 @@ export function readLearner(home: string): Learner {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Removes a stale lock without ever deleting a live one: the file is first
+ * renamed to a unique name (atomic), staleness is re-checked on the renamed
+ * file, and a live lock that was caught by mistake is linked back (no clobber).
+ */
+export function breakStaleLock(lock: string, afterStat?: () => void): boolean {
+  try {
+    if (Date.now() - statSync(lock).mtimeMs <= LOCK_STALE_MS) return false;
+    afterStat?.();
+    const grave = `${lock}.stale.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    renameSync(lock, grave);
+    if (Date.now() - statSync(grave).mtimeMs <= LOCK_STALE_MS) {
+      try {
+        linkSync(grave, lock);
+      } catch {
+        // another writer already took the lock; the caught file was theirs and is gone, nothing to restore
+      }
+      unlinkSync(grave);
+      return false;
+    }
+    unlinkSync(grave);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function withLock<T>(home: string, fn: () => T): Promise<T> {
   mkdirSync(home, { recursive: true });
   const lock = join(home, 'learner.json.lock');
@@ -85,11 +114,7 @@ async function withLock<T>(home: string, fn: () => T): Promise<T> {
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
-      } catch {
-        // lock vanished between checks; retry immediately
-      }
+      breakStaleLock(lock);
       if (Date.now() - started > LOCK_TIMEOUT_MS) throw new Error(`timed out waiting for ${lock}`);
       await sleep(LOCK_RETRY_MS + Math.random() * 10);
     }

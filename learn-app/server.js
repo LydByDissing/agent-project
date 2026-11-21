@@ -8019,7 +8019,7 @@ var serve = (options, listeningListener) => {
 };
 
 // src/state/learner.ts
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 var UnsupportedSchemaError = class extends Error {
@@ -8060,6 +8060,26 @@ function readLearner(home) {
   return existsSync(file) ? parse(file) : emptyLearner();
 }
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function breakStaleLock(lock, afterStat) {
+  try {
+    if (Date.now() - statSync(lock).mtimeMs <= LOCK_STALE_MS) return false;
+    afterStat?.();
+    const grave = `${lock}.stale.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    renameSync(lock, grave);
+    if (Date.now() - statSync(grave).mtimeMs <= LOCK_STALE_MS) {
+      try {
+        linkSync(grave, lock);
+      } catch {
+      }
+      unlinkSync(grave);
+      return false;
+    }
+    unlinkSync(grave);
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function withLock(home, fn) {
   mkdirSync(home, { recursive: true });
   const lock = join(home, "learner.json.lock");
@@ -8072,10 +8092,7 @@ async function withLock(home, fn) {
       break;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
-      } catch {
-      }
+      breakStaleLock(lock);
       if (Date.now() - started > LOCK_TIMEOUT_MS) throw new Error(`timed out waiting for ${lock}`);
       await sleep(LOCK_RETRY_MS + Math.random() * 10);
     }
@@ -8107,6 +8124,14 @@ async function initLearner(home) {
     const fresh = emptyLearner();
     writeAtomic(home, fresh);
     return fresh;
+  });
+}
+async function updateLearner(home, fn) {
+  return withLock(home, () => {
+    const current = readLearner(home);
+    const next = fn(current) ?? current;
+    writeAtomic(home, next);
+    return next;
   });
 }
 
@@ -10363,6 +10388,189 @@ function select(library, learner, now, today2) {
   return { lesson: top.lesson, reason, what_changed };
 }
 
+// src/server/app.ts
+import { randomUUID } from "node:crypto";
+
+// src/quiz/quiz.ts
+import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+var ClaudeMissingError = class extends Error {
+  constructor(bin) {
+    super(`claude binary not found: "${bin}" is not on PATH (set SDD_LEARN_CLAUDE to its location)`);
+    this.bin = bin;
+    this.name = "ClaudeMissingError";
+  }
+};
+var ClaudeTimeoutError = class extends Error {
+  constructor(ms) {
+    super(`claude -p did not finish within ${Math.round(ms / 1e3)}s (raise SDD_LEARN_QUIZ_TIMEOUT_S)`);
+    this.ms = ms;
+    this.name = "ClaudeTimeoutError";
+  }
+};
+var ClaudeExitError = class extends Error {
+  constructor(code, stderr) {
+    super(`claude -p failed (exit ${code}): ${stderr.slice(-400).trim() || "no stderr"}`);
+    this.code = code;
+    this.stderr = stderr;
+    this.name = "ClaudeExitError";
+  }
+};
+var QuizSchemaError = class extends Error {
+  constructor(detail) {
+    super(`quiz output rejected: ${detail}`);
+    this.name = "QuizSchemaError";
+  }
+};
+var UnknownSourceError = class extends Error {
+  constructor(key, known) {
+    super(`question cites unknown source "${key}"; lesson sources are ${known.join(", ")}`);
+    this.key = key;
+    this.known = known;
+    this.name = "UnknownSourceError";
+  }
+};
+var sourceKeys = (sources) => sources.map((_, i) => `s${i + 1}`);
+var srcLine = (s, i) => `- s${i + 1}: ${s.title}${s.url ? ` (${s.url})` : s.path ? ` (${s.path}${s.line ? `:${s.line}` : ""})` : ""}`;
+function buildPrompt(lesson, learner) {
+  const keys = sourceKeys(lesson.sources).join(", ");
+  const misses = learner.misses.length ? learner.misses.map((m) => `- ${m}`).join("\n") : "- none recorded";
+  return [
+    "You write a 3-question multiple-choice check for one lesson, personalised to the learner. Reply with JSON only, no prose, no tools.",
+    "",
+    `Learner: this lesson is in Leitner box ${learner.box} of 5 (0 = never answered). Interest level in this subject: ${learner.interest}.`,
+    "Questions the learner previously missed on this lesson (revisit these ideas in at least one question when any are listed):",
+    misses,
+    "",
+    'Output schema: {"questions":[{"q":string,"options":[{"text":string,"explanation":string}],"correct":integer,"source":string}]}',
+    'Rules: exactly 3 questions; 3 to 5 options each; "correct" is the 0-based index of the single right option; every option has an explanation saying why it is right or wrong; "source" is exactly one of these keys: ' + keys + ".",
+    "Test understanding, not recall of wording. Use only facts from the lesson.",
+    "",
+    `Lesson id: ${lesson.id}`,
+    `Lesson title: ${lesson.title}`,
+    "Sources:",
+    lesson.sources.map(srcLine).join("\n"),
+    "",
+    "Lesson body:",
+    "<lesson>",
+    lesson.body,
+    "</lesson>"
+  ].join("\n");
+}
+function claudeOpts(env = process.env) {
+  const secs = Number(env.SDD_LEARN_QUIZ_TIMEOUT_S ?? 90);
+  return {
+    bin: env.SDD_LEARN_CLAUDE && env.SDD_LEARN_CLAUDE !== "" ? env.SDD_LEARN_CLAUDE : "claude",
+    timeoutMs: (Number.isFinite(secs) && secs > 0 ? secs : 90) * 1e3,
+    model: env.SDD_LEARN_MODEL && env.SDD_LEARN_MODEL !== "" ? env.SDD_LEARN_MODEL : void 0
+  };
+}
+function runClaude(prompt, opts = {}) {
+  const o = { ...claudeOpts(), ...opts };
+  const args = ["-p", "--output-format", "json", "--no-session-persistence"];
+  if (o.model) args.push("--model", o.model);
+  return new Promise((resolve4, reject) => {
+    const child = spawn(o.bin, args, { cwd: tmpdir(), stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    let done = false;
+    const end = (fn) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      end(() => reject(new ClaudeTimeoutError(o.timeoutMs)));
+    }, o.timeoutMs);
+    child.stdout.on("data", (d) => out += d);
+    child.stderr.on("data", (d) => err += d);
+    child.on("error", (e) => end(() => reject(e.code === "ENOENT" ? new ClaudeMissingError(o.bin) : e)));
+    child.on("close", (code) => end(() => code === 0 ? resolve4(out) : reject(new ClaudeExitError(code, err))));
+    child.stdin.on("error", () => void 0);
+    child.stdin.end(prompt);
+  });
+}
+function modelText(stdout) {
+  let env;
+  try {
+    env = JSON.parse(stdout);
+  } catch {
+    throw new QuizSchemaError(`claude stdout is not a JSON envelope: ${stdout.slice(0, 120)}`);
+  }
+  if (env === null || typeof env !== "object") throw new QuizSchemaError("claude envelope is not an object");
+  const e = env;
+  if (e.is_error === true) throw new ClaudeExitError(0, typeof e.result === "string" ? e.result : "is_error set in envelope");
+  if (typeof e.result !== "string") throw new QuizSchemaError('claude envelope has no string "result"');
+  return e.result;
+}
+function extractJson(text) {
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const cand = (fence ? fence[1] : text).trim();
+  try {
+    return JSON.parse(cand);
+  } catch {
+    const a = cand.indexOf("{");
+    const b = cand.lastIndexOf("}");
+    if (a >= 0 && b > a) {
+      try {
+        return JSON.parse(cand.slice(a, b + 1));
+      } catch {
+      }
+    }
+    throw new QuizSchemaError(`model text is not valid JSON: ${cand.slice(0, 120)}`);
+  }
+}
+var isRec = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+var nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
+function parseQuiz(stdout, keys) {
+  const root = extractJson(modelText(stdout));
+  if (!isRec(root) || !Array.isArray(root.questions)) throw new QuizSchemaError('top level must be {"questions":[...]}');
+  if (root.questions.length !== 3) throw new QuizSchemaError(`expected exactly 3 questions, got ${root.questions.length}`);
+  return root.questions.map((raw2, i) => {
+    const at = `questions[${i}]`;
+    if (!isRec(raw2)) throw new QuizSchemaError(`${at} is not an object`);
+    if (!nonEmpty(raw2.q)) throw new QuizSchemaError(`${at}.q must be a non-empty string`);
+    const opts = raw2.options;
+    if (!Array.isArray(opts) || opts.length < 3 || opts.length > 5) {
+      throw new QuizSchemaError(`${at}.options must have 3-5 entries, got ${Array.isArray(opts) ? opts.length : typeof opts}`);
+    }
+    const options = opts.map((o, j) => {
+      if (!isRec(o) || !nonEmpty(o.text) || !nonEmpty(o.explanation)) {
+        throw new QuizSchemaError(`${at}.options[${j}] needs non-empty text and explanation`);
+      }
+      return { text: o.text, explanation: o.explanation };
+    });
+    const c = raw2.correct;
+    if (typeof c !== "number" || !Number.isInteger(c) || c < 0 || c >= options.length) {
+      throw new QuizSchemaError(`${at}.correct must be a single integer index in 0..${options.length - 1}, got ${JSON.stringify(c)}`);
+    }
+    if (!nonEmpty(raw2.source)) throw new QuizSchemaError(`${at}.source must be a source key`);
+    if (!keys.includes(raw2.source)) throw new UnknownSourceError(raw2.source, keys);
+    return { q: raw2.q, options, correct: c, source: raw2.source };
+  });
+}
+async function generateQuiz(lesson, learner, opts = {}) {
+  const stdout = await runClaude(buildPrompt(lesson, learner), opts);
+  return parseQuiz(stdout, sourceKeys(lesson.sources));
+}
+
+// src/state/leitner.ts
+var INTERVAL_DAYS = [0, 1, 2, 4, 8, 16];
+var MAX_BOX2 = 5;
+function addDays(day, n) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`today must be YYYY-MM-DD, got ${JSON.stringify(day)}`);
+  const d = /* @__PURE__ */ new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) throw new Error(`today is not a valid date: ${day}`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function leitner(box, allCorrect, today2) {
+  const next = allCorrect ? Math.min(MAX_BOX2, box + 1) : 1;
+  return { box: next, due: addDays(today2, INTERVAL_DAYS[next]) };
+}
+
 // src/server/paths.ts
 import { resolve as resolve2, sep as sep2 } from "node:path";
 var PathEscapeError = class extends Error {
@@ -10381,6 +10589,8 @@ function resolveUnder(root, requested) {
 }
 
 // src/server/app.ts
+var MISS_LIMIT = 5;
+var short = (q) => q.length > 90 ? `${q.slice(0, 89)}\u2026` : q;
 var NOW_FILE = ".sdd/now.json";
 var ID_PATH = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/i;
 function today() {
@@ -10405,11 +10615,16 @@ var MIME = {
   ".woff2": "font/woff2",
   ".ico": "image/x-icon"
 };
-function createApp({ project, distDir: distDir2, home }) {
+function createApp({ project, distDir: distDir2, home, today: todayFn = today, claude = claudeOpts }) {
   const app = new Hono3();
+  const quizzes = /* @__PURE__ */ new Map();
   const homeDir = () => home ?? learnHome();
   const library = () => loadLibrary(project);
   app.onError((err, c) => {
+    if (err instanceof ClaudeMissingError || err instanceof ClaudeExitError || err instanceof QuizSchemaError || err instanceof UnknownSourceError) {
+      return c.json({ error: { name: err.name, message: err.message } }, 502);
+    }
+    if (err instanceof ClaudeTimeoutError) return c.json({ error: { name: err.name, message: err.message } }, 504);
     if (err instanceof LibraryError) return c.json({ error: "library_invalid", issues: err.issues }, 500);
     if (err instanceof PathEscapeError) return c.json({ error: "not_found" }, 404);
     if (err instanceof SyntaxError) return c.json({ error: "now_invalid", message: err.message }, 500);
@@ -10477,6 +10692,69 @@ function createApp({ project, distDir: distDir2, home }) {
       stale: lesson.stale,
       body: lesson.body,
       diagrams: lesson.diagrams
+    });
+  });
+  app.post("/api/quiz/*", async (c) => {
+    let id;
+    try {
+      id = decodeURIComponent(new URL(c.req.url).pathname.slice("/api/quiz/".length));
+    } catch {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (!ID_PATH.test(id) || !existsSync3(join3(project, "learn"))) return c.json({ error: "not_found" }, 404);
+    const lesson = library().lessons.find((l) => l.id === id);
+    if (!lesson) return c.json({ error: "not_found" }, 404);
+    const learner = readLearner(homeDir());
+    const misses = [...new Set(learner.history.filter((h) => h.lesson === id && h.chosen !== h.correct).map((h) => h.q))].slice(-MISS_LIMIT);
+    const slice = { box: learner.mastery[id]?.box ?? 0, interest: interestFor(learner, lesson.domain, lesson.topic), misses };
+    const started = Date.now();
+    const questions = await generateQuiz(lesson, slice, claude());
+    const quizId = randomUUID();
+    const keys = sourceKeys(lesson.sources);
+    quizzes.set(quizId, { lessonId: id, questions, keys, sources: lesson.sources, chosen: questions.map(() => void 0) });
+    return c.json({
+      quizId,
+      seconds: Math.round((Date.now() - started) / 100) / 10,
+      persona: { box: slice.box, interest: slice.interest, misses },
+      questions: questions.map((q) => ({ q: q.q, options: q.options.map((o) => o.text) }))
+    });
+  });
+  app.post("/api/answer", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const quiz = typeof body?.quizId === "string" ? quizzes.get(body.quizId) : void 0;
+    if (!body || !quiz) return c.json({ error: "unknown_quiz" }, 404);
+    const qi = body.questionIndex;
+    const q = typeof qi === "number" && Number.isInteger(qi) ? quiz.questions[qi] : void 0;
+    if (!q || typeof qi !== "number") return c.json({ error: "bad_question_index" }, 400);
+    const chosen = body.chosen;
+    if (typeof chosen !== "number" || !Number.isInteger(chosen) || chosen < 0 || chosen >= q.options.length) return c.json({ error: "bad_choice" }, 400);
+    if (quiz.chosen[qi] !== void 0) return c.json({ error: "already_answered" }, 409);
+    quiz.chosen[qi] = chosen;
+    const day = todayFn();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const done = quiz.chosen.every((x) => x !== void 0);
+    const allCorrect = done && quiz.chosen.every((x, i) => x === quiz.questions[i].correct);
+    const srcIdx = quiz.keys.indexOf(q.source);
+    let result;
+    try {
+      await updateLearner(homeDir(), (cur) => {
+        cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: now, explanation: q.options[chosen].explanation, source: q.source });
+        if (done) {
+          result = leitner(cur.mastery[quiz.lessonId]?.box ?? 0, allCorrect, day);
+          cur.mastery[quiz.lessonId] = result;
+        }
+      });
+    } catch (err) {
+      quiz.chosen[qi] = void 0;
+      throw err;
+    }
+    if (done) quizzes.delete(body.quizId);
+    return c.json({
+      correct: chosen === q.correct,
+      correctIndex: q.correct,
+      explanations: q.options.map((o) => o.explanation),
+      source: { key: q.source, ...quiz.sources[srcIdx] },
+      ...result ? { complete: true, allCorrect, box: result.box, due: result.due } : { complete: false }
     });
   });
   app.get("/api/asset/*", async (c) => {

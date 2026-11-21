@@ -52,7 +52,7 @@ describe('built SPA bundle', () => {
 
   it('bundle polls /api/now on a 2000 ms interval', () => {
     // esbuild/vite minify 2000 to 2e3; the positive control is the setInterval call itself
-    expect(bundle()).toMatch(/setInterval\(\(\)=>void \w+\(\),2e3\)/);
+    expect(bundle()).toMatch(/setInterval\(\(\)=>void [\w$]+\(\),2e3\)/);
   });
 
   it('bundle contains the wave-finished banner text', () => {
@@ -82,7 +82,7 @@ describe.skipIf(!canRunChromium)('headless Chromium render of the real server', 
     const port = await freePort();
     base = `http://127.0.0.1:${port}`;
     child = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_PORT: String(port) },
+      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_CLAUDE: join(LEARN_APP, 'test', 'fixtures', 'fake-claude.mjs'), SDD_LEARN_PORT: String(port) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     await new Promise<void>((res, rej) => {

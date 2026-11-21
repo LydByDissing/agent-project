@@ -1,5 +1,5 @@
-// [origin ref=llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
-//   [intent]Renders wave strip, topic tree, what-changed note, learner.json peek and the selected lesson from the JSON API, polling /api/now every 2s.[/intent]
+// [origin ref=llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
+//   [intent]Renders wave strip, topic tree, what-changed note, learner.json peek, the selected lesson and its live quiz (prefetched, graded server-side) from the JSON API, polling /api/now every 2s.[/intent]
 //   [inv]The SPA only talks to the server's JSON API; Markdown HTML is escaped, never injected raw.[/inv]
 // [/origin]
 import { Marked } from 'marked';
@@ -126,9 +126,113 @@ async function showLesson(id: string, why: string): Promise<void> {
       <p class="sub">Lesson ${lesson.topic_position} of ${lesson.topic_size} in ${esc(lesson.topic_title)}.</p>
       <div class="prose" id="prose">${renderMarkdown(lesson)}</div>
       <div class="sources"><div class="label">Sources</div><ol>${lesson.sources.map(sourceRow).join('')}</ol></div>
-    </article>`;
+    </article>
+    <section class="quiz" id="quiz">
+      <div class="qhead"><h2>Check yourself</h2><div class="gen" id="gen"></div></div>
+      <div class="persona" id="persona" hidden></div>
+      <div id="qs"></div>
+      <div id="result" hidden></div>
+    </section>`;
   wireDiagrams();
   renderTree();
+  void loadQuiz(lesson.id);
+}
+
+interface QuizDoc { quizId: string; seconds: number; persona: { box: number; interest: string; misses: string[] }; questions: Array<{ q: string; options: string[] }> }
+interface AnswerDoc {
+  correct: boolean; correctIndex: number; explanations: string[]; source: Source & { key: string };
+  complete: boolean; allCorrect?: boolean; box?: number; due?: string;
+}
+let quizSeq = 0;
+
+async function loadQuiz(lessonId: string): Promise<void> {
+  const seq = ++quizSeq;
+  const live = (): boolean => seq === quizSeq && current === lessonId && !!document.getElementById('gen');
+  $('gen').innerHTML = '<span><b>●</b> generating</span><span>claude -p is writing your questions while you read</span>';
+  $('qs').innerHTML = '';
+  $('result').hidden = true;
+  $('persona').hidden = true;
+  try {
+    const res = await fetch(`/api/quiz/${lessonId}`, { method: 'POST' });
+    const data = (await res.json()) as QuizDoc & { error?: { name: string; message: string } | string };
+    if (!live()) return;
+    if (!res.ok) {
+      const e = typeof data.error === 'object' ? data.error : { name: 'Error', message: String(data.error ?? res.status) };
+      return quizError(lessonId, e.name, e.message);
+    }
+    $('gen').innerHTML = `<span><b>●</b> ready</span><span>claude -p · generated while you read · ${data.seconds} s</span>`;
+    const p = data.persona;
+    const misses = p.misses.length ? `, and you missed ${p.misses.map((m) => `<b>"${esc(m)}"</b>`).join(', ')} before, so those come back` : '';
+    $('persona').innerHTML = `Written for you: this lesson is in <b>box ${p.box}</b>, this subject is set to <b>${esc(p.interest)}</b>${misses}.`;
+    $('persona').hidden = false;
+    renderQuestions(data);
+  } catch (err) {
+    if (live()) quizError(lessonId, (err as Error).name, (err as Error).message);
+  }
+}
+
+function quizError(lessonId: string, name: string, message: string): void {
+  $('gen').innerHTML = '<span><b>●</b> error</span>';
+  $('qs').innerHTML = `<div class="result bad"><span><b>${esc(name)}</b>: ${esc(message)}</span><button type="button" class="btn" id="retry">Retry</button></div>`;
+  $('retry').addEventListener('click', () => void loadQuiz(lessonId));
+}
+
+function renderQuestions(quiz: QuizDoc): void {
+  const n = quiz.questions.length;
+  $('qs').innerHTML = quiz.questions.map((q, qi) => `<div class="q" data-q="${qi}"><h3><span class="n">${qi + 1}/${n}</span>${esc(q.q)}</h3><div class="opts">${
+    q.options.map((o, oi) => `<button type="button" class="opt" data-q="${qi}" data-o="${oi}"><span class="key">${'ABCDE'[oi]}</span><span>${esc(o)}</span></button>`).join('')}</div></div>`).join('');
+  $('qs').onclick = (e) => {
+    const b = (e.target as HTMLElement).closest('.opt') as HTMLButtonElement | null;
+    if (!b || b.disabled) return;
+    const qi = Number(b.dataset.q);
+    const group = b.closest('.opts') as HTMLElement;
+    group.querySelectorAll<HTMLButtonElement>('.opt').forEach((x) => (x.disabled = true));
+    void answer(quiz.quizId, qi, Number(b.dataset.o), group);
+  };
+}
+
+async function answer(quizId: string, qi: number, chosen: number, group: HTMLElement): Promise<void> {
+  const unlock = (): void => group.querySelectorAll<HTMLButtonElement>('.opt').forEach((x) => (x.disabled = false));
+  try {
+    const res = await fetch('/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quizId, questionIndex: qi, chosen }) });
+    const a = (await res.json()) as AnswerDoc & { error?: string };
+    if (!res.ok) {
+      if (res.status !== 409) unlock();
+      $('result').hidden = false;
+      $('result').className = 'result bad';
+      $('result').textContent = `Could not grade: ${a.error ?? res.status}`;
+      return;
+    }
+    const link = a.source.url ? `<a href="${esc(safeHref(a.source.url))}" target="_blank" rel="noopener">${esc(a.source.title)}</a>` : `<span class="mono">${esc(a.source.title)}</span>`;
+    group.querySelectorAll<HTMLElement>('.opt').forEach((x) => {
+      const k = Number(x.dataset.o);
+      if (k === a.correctIndex) x.classList.add('right');
+      else if (k === chosen) x.classList.add('wrong');
+      x.insertAdjacentHTML('beforeend', `<span class="ex">${esc(a.explanations[k] ?? '')} ${link}</span>`);
+    });
+    if (a.complete) {
+      const r = $('result');
+      r.hidden = false;
+      r.className = `result ${a.allCorrect ? 'ok' : 'bad'}`;
+      r.innerHTML = (a.allCorrect ? `All correct. Revalidation moves to box ${a.box}. ` : `Not quite. Revalidation drops to box ${a.box} and comes back soon, with new questions on what you missed. `) + `<span class="mono">next review ${esc(a.due ?? '')}</span>`;
+    }
+    void refreshAfterAnswer();
+  } catch (err) {
+    unlock();
+    $('result').hidden = false;
+    $('result').className = 'result bad';
+    $('result').textContent = `Could not grade: ${(err as Error).message}`;
+  }
+}
+
+async function refreshAfterAnswer(): Promise<void> {
+  try {
+    tree = (await getJson<{ domains: TreeDomain[] }>('/api/tree')).domains;
+    renderTree();
+    await refreshLearnerPeek();
+  } catch {
+    // the next lesson open refreshes both
+  }
 }
 
 function wireDiagrams(): void {
