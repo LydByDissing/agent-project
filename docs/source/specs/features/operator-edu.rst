@@ -3,7 +3,7 @@ Operator Education — Learn While the Agents Work
 
 .. feat:: Operator Education — Learn While the Agents Work
    :id: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
 
    With agentic coding the operator (the developer driving ``/sdd``) loses
    contact with the details: sub-agents write the code while the operator
@@ -29,7 +29,7 @@ Requirements
 .. req:: Learn library in a top-level learn/ folder, organised as domain / topic / lesson
    :id: REQ-OPERATOR-EDU-001
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Large subjects (e.g. IaC) cannot fit in one lesson. A
        three-level hierarchy with ordered, prerequisite-linked lessons lets
        the library grow in depth without becoming one huge page. Keeping it
@@ -58,7 +58,7 @@ Requirements
 .. req:: Every lesson lists its sources
    :id: REQ-OPERATOR-EDU-002
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: The operator must be able to read further and to check the
        generated content. An unsourced lesson cannot be trusted or
        followed up.
@@ -79,7 +79,7 @@ Requirements
 .. req:: Diagrams kept as source plus pre-rendered SVG
    :id: REQ-OPERATOR-EDU-003
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Lessons need rich diagrams (C4, sequence, infra topology).
        Rendering at generation time allows any diagram tool (PlantUML, D2,
        Mermaid) and keeps the SPA a plain image viewer (ADR-004).
@@ -101,7 +101,7 @@ Requirements
 .. req:: Plan phase tags jobs with topics and generates or refreshes lessons
    :id: REQ-OPERATOR-EDU-004
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: The plan phase already knows which C4 elements, ADRs and
        technologies each job touches, so it is the cheapest place to decide
        what is on topic. Generating before implement means lessons are ready
@@ -128,7 +128,7 @@ Requirements
 .. req:: Local learner state file
    :id: REQ-OPERATOR-EDU-005
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Knowledge and interests belong to the person, not to the
        repo. Keeping them in the home directory means they are never
        committed and carry over between projects, since lessons are generic
@@ -160,7 +160,7 @@ Requirements
 .. req:: Interest onboarding and inline interest adjustment
    :id: REQ-OPERATOR-EDU-006
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Operators care about different things. One operator wants
        backend depth and no CSS detail. Without an interest profile the app
        wastes the waiting time on unwanted material.
@@ -187,7 +187,7 @@ Requirements
 .. req:: On-topic lesson selection weighted by interest and mastery
    :id: REQ-OPERATOR-EDU-007
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: The lesson shown should relate to what the agents are doing
        now, match the operator's interest depth, and avoid material they
        already know, while known material still comes back for review.
@@ -213,7 +213,7 @@ Requirements
 .. req:: Personalised multiple-choice questions generated live with claude -p
    :id: REQ-OPERATOR-EDU-008
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Fixed question banks soon test things the operator already
        knows or miss what they got wrong. Generating per operator, from
        their mastery and past mistakes, keeps the questions at their level.
@@ -243,7 +243,7 @@ Requirements
 .. req:: Answers update mastery
    :id: REQ-OPERATOR-EDU-009
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: Mastery must follow actual performance so that known
        content drops out and weak content returns.
    :acceptance: Given a lesson at box 2, when the operator answers all
@@ -263,7 +263,7 @@ Requirements
 .. req:: Conductor publishes wave status and opens the learn app
    :id: REQ-OPERATOR-EDU-010
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: The learn app must know what is running to stay on topic,
        and the operator must be pulled toward it at the moment they would
        otherwise drift off.
@@ -289,7 +289,7 @@ Requirements
 .. req:: Learn server and SPA
    :id: REQ-OPERATOR-EDU-011
    :links: FEAT-OPERATOR-EDU
-   :status: approved
+   :status: implemented
    :rationale: A dynamic app is needed to write state, follow wave progress
        and run quizzes. The static Sphinx site cannot do this (ADR-002).
    :acceptance: Given ``learn-app/`` shipped in the plugin, when
