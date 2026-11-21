@@ -1,0 +1,2 @@
+title: HTTP caching
+summary: How browsers and shared caches store responses, decide they are fresh, and check them again with the origin.

@@ -6,12 +6,14 @@
   "scripts": {
     "build:spa": "vite build",
     "build:server": "esbuild src/server/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=server.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
-    "build": "npm run build:spa && npm run build:server",
+    "build:cli": "esbuild src/library/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=cli.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "build": "npm run build:spa && npm run build:server && npm run build:cli",
     "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
