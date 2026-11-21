@@ -15,8 +15,20 @@
     <div class="wave" id="wave" aria-live="polite"></div>
   </div>
 </header>
+<div class="banner" id="banner" hidden>
+  <div class="banner-in" id="banner-text"></div>
+</div>
 <div class="shell">
-  <main id="app"></main>
+  <aside>
+    <div class="label">What you know</div>
+    <div class="tree" id="tree"></div>
+    <div class="note" id="changed"></div>
+    <details class="state">
+      <summary>~/.sdd/learner.json</summary>
+      <pre id="statejson"></pre>
+    </details>
+  </aside>
+  <main id="app">Loading lessons...</main>
 </div>
 <script type="module" src="./main.ts"></script>
 </body>

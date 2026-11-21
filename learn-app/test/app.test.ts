@@ -1,5 +1,5 @@
 // [origin ref=llm-dsl-gu1y.1 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
-//   [intent]Verifies health, SPA serving, 404 path-traversal handling and stub routes of the server app.[/intent]
+//   [intent]Verifies health, SPA serving, 404 path-traversal handling and unknown-lesson handling of the server app.[/intent]
 // [/origin]
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,7 @@ import { PathEscapeError, resolveUnder } from '../src/server/paths.js';
 const dist = mkdtempSync(join(tmpdir(), 'learn-dist-'));
 writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
 writeFileSync(join(dist, '..', 'secret.txt'), 'secret');
-const app = createApp({ project: dist, distDir: dist });
+const app = createApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-home-')) });
 
 describe('server app', () => {
   it('reports health', async () => {
@@ -31,8 +31,8 @@ describe('server app', () => {
     expect((await app.request('/..%2Fsecret.txt')).status).toBe(404);
     expect((await app.request('/%2e%2e/secret.txt')).status).toBe(404);
   });
-  it('stubs valid lesson ids with 501', async () => {
-    expect((await app.request('/api/lesson/intro-01')).status).toBe(501);
+  it('404s an unknown lesson id', async () => {
+    expect((await app.request('/api/lesson/intro-01')).status).toBe(404);
   });
 });
 

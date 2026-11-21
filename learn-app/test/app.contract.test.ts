@@ -13,23 +13,14 @@ let app: ReturnType<typeof createApp>;
 beforeAll(() => {
   const dist = mkdtempSync(join(tmpdir(), 'learn-contract-dist-'));
   writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
-  app = createApp({ project: dist, distDir: dist });
+  app = createApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-contract-home-')) });
 });
 
-describe('API stub routes', () => {
-  it.each(['/api/now', '/api/learner', '/api/tree', '/api/next'])(
-    '%s returns 501 with named error not_implemented',
-    async (path) => {
-      const res = await app.request(path);
-      expect(res.status).toBe(501);
-      expect(await res.json()).toEqual({ error: 'not_implemented' });
-    },
-  );
-
-  it('lesson route with a valid id returns 501 with named error not_implemented', async () => {
+describe('API contract', () => {
+  it('lesson route with an unknown id returns 404 with named error not_found', async () => {
     const res = await app.request('/api/lesson/intro-01');
-    expect(res.status).toBe(501);
-    expect(await res.json()).toEqual({ error: 'not_implemented' });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
   });
 
   it('lesson route with an id starting with an underscore returns 404 with named error not_found', async () => {

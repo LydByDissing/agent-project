@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
-  <script type="module" crossorigin src="./assets/index-C9bs8C9w.js"></script>
+  <script type="module" crossorigin src="./assets/index-C2UwqtTd.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-ExwrczEw.css">
 </head>
 <body>
@@ -17,8 +17,20 @@
     <div class="wave" id="wave" aria-live="polite"></div>
   </div>
 </header>
+<div class="banner" id="banner" hidden>
+  <div class="banner-in" id="banner-text"></div>
+</div>
 <div class="shell">
-  <main id="app"></main>
+  <aside>
+    <div class="label">What you know</div>
+    <div class="tree" id="tree"></div>
+    <div class="note" id="changed"></div>
+    <details class="state">
+      <summary>~/.sdd/learner.json</summary>
+      <pre id="statejson"></pre>
+    </details>
+  </aside>
+  <main id="app">Loading lessons...</main>
 </div>
 </body>
 </html>

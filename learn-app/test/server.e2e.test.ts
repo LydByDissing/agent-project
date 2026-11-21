@@ -42,7 +42,7 @@ function freePort(): Promise<number> {
 async function startServer(script: string, project: string): Promise<Running> {
   const port = await freePort();
   const child = spawn(process.execPath, [script, '--project', project], {
-    env: { ...process.env, SDD_LEARN_PORT: String(port) },
+    env: { ...process.env, SDD_LEARN_PORT: String(port), SDD_LEARN_HOME: mkdtempSync(join(tmpdir(), 'learn-e2e-home-')) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -235,18 +235,15 @@ describe('bundle copy with no node_modules ancestor', () => {
     expect(res.body).not.toContain(SECRET);
   });
 
-  it('lesson API with a valid id returns 501 named not_implemented', async () => {
+  it('lesson API with an unknown id returns 404 named not_found', async () => {
     const res = await rawGet(running.port, '/api/lesson/intro-01');
-    expect(res.status).toBe(501);
-    expect(JSON.parse(res.body)).toEqual({ error: 'not_implemented' });
+    expect(res.status).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: 'not_found' });
   });
 
-  it.each(['/api/now', '/api/learner', '/api/tree', '/api/next'])(
-    'stub route %s returns 501 named not_implemented',
-    async (path) => {
-      const res = await rawGet(running.port, path);
-      expect(res.status).toBe(501);
-      expect(JSON.parse(res.body)).toEqual({ error: 'not_implemented' });
-    },
-  );
+  it('now API answers with an empty job list when no run is published', async () => {
+    const res = await rawGet(running.port, '/api/now');
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ jobs: [] });
+  });
 });
