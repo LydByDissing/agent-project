@@ -1,6 +1,5 @@
 @startuml revalidation
 skinparam shadowing false
-skinparam participantPadding 40
 participant "Client" as C
 participant "Cache" as K
 participant "Origin" as O

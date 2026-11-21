@@ -8,8 +8,8 @@ description: >
   Not normally invoked directly.
 ---
 
-# [origin ref=llm-dsl-l3a,llm-dsl-0p1 req=REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
-#   [intent]Planning skill prompts for SDD pipeline: validates docs, extracts requirements and C4 context, decomposes into tracer-bullet vertical slices driven by observable behavior with prefactor identification and file-overlap dependencies[/intent]
+# [origin ref=llm-dsl-gu1y.13,llm-dsl-l3a,llm-dsl-0p1 req=REQ-OPERATOR-EDU-004,REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
+#   [intent]Planning skill prompts for SDD pipeline: validates docs, extracts requirements and C4 context, decomposes into tracer-bullet vertical slices driven by observable behavior with prefactor identification and file-overlap dependencies, tags exec jobs with learn topics and prepares matching lessons[/intent]
 # [/origin]
 
 # Plan Skill
@@ -32,9 +32,10 @@ Read `skills/rules/RULES.md` before starting.
 ```
 1. PREFLIGHT   — verify docs are ready for this feature
 2. EXTRACT     — read requirements and C4 context from docs
-3. DECOMPOSE   — plan tasks per component group
+3. DECOMPOSE   — plan tasks per component group; tag each job with topics=
 4. CONFIRM     — present plan to user; hard gate
 5. CREATE      — create bd issues with enriched DSL
+5b. LEARN      — prepare lessons for the tagged topics (never blocks the gate)
 6. HANDOFF     — return [exec] block to sdd
 ```
 
@@ -290,7 +291,15 @@ Add 1 reviewer task covering the entire feature:
 - Depends on all coder tasks
 - Model: sonnet (opus for auth/payments/migration)
 
-### 3h. Define the Definition of Done
+### 3h. Tag jobs with learn topics
+
+Each coder, tester and reviewer job in the `[exec]` block carries `topics=`, the
+learn-library topic ids it touches, as `<domain>/<topic>` (comma-separated, no spaces).
+Derive them from the job's C4 component, technology and [out] paths (for example,
+a Terraform module touches `iac/terraform-state`). Omit `topics=` only when no
+library topic applies. Never invent a topic that has no plausible learning value.
+
+### 3i. Define the Definition of Done
 
 - All prefactor coder tasks closed with `s=ok`
 - Happy-path coder task closed with `s=ok` (end-to-end behavior validated)
@@ -299,6 +308,7 @@ Add 1 reviewer task covering the entire feature:
 - All tester tasks closed with `s=ok` (tests passing)
 - Reviewer verdict: `approve` or `request-changes` (not `block`)
 - All acceptance criteria verified on their respective slice close
+- Lessons prepared for the tagged topics (Step 5b), or skipped per interest
 
 ---
 
@@ -411,16 +421,82 @@ done
 
 ---
 
+## Step 5b — Prepare Lessons for Tagged Topics
+
+Runs after the bd issues exist, so it never delays the confirm gate. Skip this
+step only if no job carries `topics=`.
+
+**1. Read the operator's interest.** Let `LEARN_HOME="${SDD_LEARN_HOME:-$HOME/.sdd}"`.
+Read `$LEARN_HOME/learner.json`. Its `interest` map sets `deep`, `basics` or `skip`
+per domain or per topic; a topic entry overrides its domain. If the file or the
+entry is absent, the interest is `basics`.
+
+**2. Map interest to the allowed depth.**
+
+| Interest | Lesson levels to have |
+|---|---|
+| `deep` | `intro`, `working`, `deep` |
+| `basics` | `intro` |
+| `skip` | none (generate nothing for this topic) |
+
+**3. Write missing lessons.** For each tagged topic whose interest is not `skip`,
+and for each allowed level with no lesson at that level in `learn/<domain>/<topic>/`:
+- Create `learn/<domain>/<topic>/<NN>-<slug>.md` following REQ-OPERATOR-EDU-001.
+  Front matter: `id: <domain>/<topic>/<NN>-<slug>`, `title`, `level`,
+  `requires:` (lesson ids of earlier levels in the same topic, or `[]`),
+  `sources:` (at least one entry, each with `title` and a `url` or a repo-relative
+  `path[:line]`), and `updated:` set to today's date (`date +%F`).
+- Use only sources you have actually read or can cite. Never invent a URL.
+- Keep the body short and practical: what the concept is, why it matters, one
+  concrete example, one thing to try.
+- Create `learn/<domain>/index.yaml` and `learn/<domain>/<topic>/index.yaml`
+  (`title`, `summary`) when missing.
+- For a diagram, write `learn/<domain>/<topic>/diagrams/<name>.puml`, name its
+  `@startuml` block `<name>`, and reference `diagrams/<name>.svg` from the body.
+  Avoid deprecated PlantUML syntax: the render step fails on any warning banner.
+
+**4. Refresh stale lessons.** For each existing lesson in a tagged topic that is
+not `skip`, revise it and set `updated` to today when either:
+- its front matter has `stale: true` (remove the flag after revising), or
+- its `updated` date is older than the newest commit date of any of its path
+  sources (`git log -1 --format=%cs -- <path>`).
+
+**5. Render diagrams.** Run from the project root:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/docs/scripts/generate_diagrams.py" --dir "$CLAUDE_PROJECT_DIR/learn"
+```
+
+It renders every `.puml` under `learn/` to an SVG beside its source and exits
+non-zero, naming the file, if an SVG carries a PlantUML warning. Fix the source and re-run.
+
+**6. Validate and commit.**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/learn-app/cli.js" validate --project "$CLAUDE_PROJECT_DIR"
+```
+
+If validation fails, fix the named lesson and re-run. Then commit the new and
+changed files under `learn/` together with the plan commit. Lesson generation
+never asks the operator a question and never blocks the plan. If the lessons
+cannot be made valid, record the topic as a bd note on the plan epic and continue.
+
+No quiz questions are generated here. Lessons never go under `docs/`.
+
+---
+
 ## Step 6 — Build and Return Exec Block
 
 Build the `[exec]` block and return it to sdd:
 
 ```
 [exec run=<RUN_ID> feat=<FEAT_ID>]
-[job id=<BD_CODER> role=coder model=haiku|sonnet]
-[job id=<BD_TESTER> role=tester model=haiku depends=<BD_CODER>]
+[job id=<BD_CODER> role=coder model=haiku|sonnet topics=iac/terraform-state]
+[job id=<BD_TESTER> role=tester model=haiku depends=<BD_CODER> topics=iac/terraform-state]
 [job id=<BD_REVIEWER> role=reviewer model=sonnet depends=<BD_CODER>]
 [/exec]
 ```
+
+Omit `topics=` from a job that has none (the reviewer example above).
 
 sdd passes this to the conductor skill.
