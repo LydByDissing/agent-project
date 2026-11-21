@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.5,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011,REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]CLI entry point: parses --project, creates learner.json (refusing unknown schemas) and starts the server bound to 127.0.0.1 only.[/intent]
 //   [inv]The listener hostname is always 127.0.0.1.[/inv]
 // [/origin]
@@ -28,7 +28,7 @@ try {
   const port = Number(process.env.SDD_LEARN_PORT ?? 4747);
   const home = learnHome();
   await initLearner(home);
-  serve({ fetch: createApp({ project, distDir, home }).fetch, hostname: HOST, port }, (info) => {
+  serve({ fetch: createApp({ port, project, distDir, home }).fetch, hostname: HOST, port }, (info) => {
     console.log(`SDD Learn listening on http://${HOST}:${info.port} (project ${project}, learner ${home})`);
   });
 } catch (err) {

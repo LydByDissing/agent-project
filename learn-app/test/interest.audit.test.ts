@@ -9,7 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEARN_APP = resolve(HERE, '..');
@@ -71,7 +71,7 @@ function fixture(learner?: Learner) {
   const home = tmp();
   copyLearn(project);
   if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
-  const app = createApp({
+  const app = makeApp({
     project,
     distDir: project,
     home,

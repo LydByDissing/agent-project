@@ -10596,6 +10596,8 @@ function resolveUnder(root, requested) {
 var MISS_LIMIT = 5;
 var QUIZ_TTL_MS = 60 * 60 * 1e3;
 var INTEREST_VALUES = ["deep", "basics", "skip"];
+var JSON_TYPE = /^application\/json\s*(;|$)/i;
+var WRITE_METHODS = /* @__PURE__ */ new Set(["POST", "PUT", "DELETE", "PATCH"]);
 var short = (q) => q.length > 90 ? `${q.slice(0, 89)}\u2026` : q;
 var NOW_FILE = ".sdd/now.json";
 var ID_PATH = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/i;
@@ -10624,7 +10626,7 @@ var MIME = {
 function interestKeys(lib) {
   return new Set(lib.domains.flatMap((d) => [d.id, ...d.topics.map((t) => t.id)]));
 }
-function createApp({ project, distDir: distDir2, home, today: todayFn = today, claude = claudeOpts, now = Date.now }) {
+function createApp({ port, project, distDir: distDir2, home, today: todayFn = today, claude = claudeOpts, now = Date.now }) {
   const app = new Hono3();
   const quizzes = /* @__PURE__ */ new Map();
   const homeDir = () => home ?? learnHome();
@@ -10632,6 +10634,18 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
   const evictQuizzes = (at) => {
     for (const [id, q] of quizzes) if (at - q.createdAt > QUIZ_TTL_MS) quizzes.delete(id);
   };
+  const hosts = /* @__PURE__ */ new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  const origins = /* @__PURE__ */ new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  app.use("*", async (c, next) => {
+    const host = c.req.header("host");
+    if (host === void 0 || !hosts.has(host.toLowerCase())) return c.json({ error: "forbidden_host", message: "Host must be 127.0.0.1 or localhost on the server port" }, 403);
+    const origin = c.req.header("origin");
+    if (origin !== void 0 && !origins.has(origin.toLowerCase())) return c.json({ error: "forbidden_origin", message: "cross-origin requests are not allowed" }, 403);
+    if (WRITE_METHODS.has(c.req.method) && !JSON_TYPE.test(c.req.header("content-type") ?? "")) {
+      return c.json({ error: "unsupported_media_type", message: "writes must send Content-Type: application/json" }, 415);
+    }
+    await next();
+  });
   app.onError((err, c) => {
     if (err instanceof ClaudeMissingError || err instanceof ClaudeExitError || err instanceof QuizSchemaError || err instanceof UnknownSourceError) {
       return c.json({ error: { name: err.name, message: err.message } }, 502);
@@ -10662,12 +10676,17 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
     const known = interestKeys(library());
     for (const [key, value] of pairs) {
       if (!known.has(key)) return c.json({ error: "unknown_key", key, message: `unknown interest key ${JSON.stringify(key)}: use a domain or domain/topic in learn/` }, 400);
-      if (!INTEREST_VALUES.includes(value)) {
-        return c.json({ error: "bad_value", key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be deep, basics or skip` }, 400);
+      const inheritOk = value === "inherit" && key.includes("/");
+      if (!inheritOk && !INTEREST_VALUES.includes(value)) {
+        const allowed = key.includes("/") ? "deep, basics, skip or inherit" : "deep, basics or skip";
+        return c.json({ error: "bad_value", key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be ${allowed}` }, 400);
       }
     }
     const next = await updateLearner(homeDir(), (cur) => {
-      for (const [key, value] of pairs) cur.interest[key] = value;
+      for (const [key, value] of pairs) {
+        if (value === "inherit") delete cur.interest[key];
+        else cur.interest[key] = value;
+      }
     });
     return c.json({ interest: next.interest });
   });
@@ -10770,14 +10789,14 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
     if (quiz.chosen[qi] !== void 0) return c.json({ error: "already_answered" }, 409);
     quiz.chosen[qi] = chosen;
     const day = todayFn();
-    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const answeredAt = (/* @__PURE__ */ new Date()).toISOString();
     const done = quiz.chosen.every((x) => x !== void 0);
     const allCorrect = done && quiz.chosen.every((x, i) => x === quiz.questions[i].correct);
     const srcIdx = quiz.keys.indexOf(q.source);
     let result;
     try {
       await updateLearner(homeDir(), (cur) => {
-        cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: now2, explanation: q.options[chosen].explanation, source: q.source });
+        cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: answeredAt, explanation: q.options[chosen].explanation, source: q.source });
         if (done) {
           result = leitner(cur.mastery[quiz.lessonId]?.box ?? 0, allCorrect, day);
           cur.mastery[quiz.lessonId] = result;
@@ -10854,7 +10873,7 @@ try {
   const port = Number(process.env.SDD_LEARN_PORT ?? 4747);
   const home = learnHome();
   await initLearner(home);
-  serve({ fetch: createApp({ project, distDir, home }).fetch, hostname: HOST, port }, (info) => {
+  serve({ fetch: createApp({ port, project, distDir, home }).fetch, hostname: HOST, port }, (info) => {
     console.log(`SDD Learn listening on http://${HOST}:${info.port} (project ${project}, learner ${home})`);
   });
 } catch (err) {

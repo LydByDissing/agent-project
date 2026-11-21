@@ -1,9 +1,11 @@
-// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
+// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011,REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
 //   [intent]Renders the wave strip, topic tree, lesson with its live quiz, the interest onboarding and settings view, and the more-like-this / basics / not-for-me controls, all from the JSON API.[/intent]
 //   [inv]The SPA only talks to the server's JSON API; Markdown HTML is escaped, never injected raw; an empty interest map on load always routes to the onboarding view.[/inv]
 // [/origin]
 import { Marked } from 'marked';
+import './fonts.css';
 import './style.css';
+import { safeHref } from './href.js';
 
 interface Job { id: string; title: string; topics: string[]; status: string }
 interface NowDoc { run?: string; wave?: number; jobs: Job[] }
@@ -23,7 +25,6 @@ interface NextDoc { lesson: { id: string } | null; reason: string; what_changed:
 
 const $ = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-const safeHref = (h: string): string => (/^(https?:|mailto:|#|\/)/i.test(h) ? h : '#');
 
 function assetUrl(lesson: LessonDoc, src: string): string {
   const clean = src.replace(/^\.\//, '');
@@ -166,7 +167,7 @@ async function loadQuiz(lessonId: string): Promise<void> {
   $('result').hidden = true;
   $('persona').hidden = true;
   try {
-    const res = await fetch(`/api/quiz/${lessonId}`, { method: 'POST' });
+    const res = await fetch(`/api/quiz/${lessonId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const data = (await res.json()) as QuizDoc & { error?: { name: string; message: string } | string };
     if (!live()) return;
     if (!res.ok) {
@@ -273,7 +274,7 @@ async function refreshTree(): Promise<void> {
   renderTree();
 }
 
-async function putInterest(body: { key: string; value: Interest }): Promise<void> {
+async function putInterest(body: { key: string; value: Interest | 'inherit' }): Promise<void> {
   const res = await fetch('/api/interest', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = (await res.json()) as { interest?: Record<string, Interest>; message?: string; error?: string };
   if (!res.ok) throw new Error(data.message ?? data.error ?? `PUT /api/interest: ${res.status}`);
@@ -289,9 +290,9 @@ function notify(msg: string, bad = false): void {
   toastTimer = window.setTimeout(() => (t.hidden = true), 2600);
 }
 
-const seg = (key: string, own: Interest | undefined, label: string): string =>
-  `<div class="seg" role="group" aria-label="${esc(label)}">${(['deep', 'basics', 'skip'] as const)
-    .map((v) => `<button type="button" data-k="${esc(key)}" data-v="${v}" aria-pressed="${own === v}">${v}</button>`).join('')}</div>`;
+const seg = (key: string, own: Interest | undefined, label: string, inherit = false): string =>
+  `<div class="seg" role="group" aria-label="${esc(label)}">${(inherit ? (['deep', 'basics', 'skip', 'inherit'] as const) : (['deep', 'basics', 'skip'] as const))
+    .map((v) => `<button type="button" data-k="${esc(key)}" data-v="${v}" aria-pressed="${v === 'inherit' ? own === undefined : own === v}">${v}</button>`).join('')}</div>`;
 
 function renderInterests(): void {
   if (!interests) return;
@@ -304,7 +305,7 @@ function renderInterests(): void {
     const topics = d.topics.map((t) => {
       const tv = interest[t.id];
       const note = tv ? 'set for this topic' : `inherits ${dv ?? 'basics'}`;
-      return `<div class="irow itopic"><div><span class="mono">${esc(t.title)}</span><small>${esc(note)}</small></div>${seg(t.id, tv, `${t.title} interest`)}</div>`;
+      return `<div class="irow itopic"><div><span class="mono">${esc(t.title)}</span><small>${esc(note)}</small></div>${seg(t.id, tv, `${t.title} interest`, true)}</div>`;
     }).join('');
     const dnote = `${dv ? 'set for this domain' : 'not set yet, basics applies'} · ${d.topics.length} topics`;
     return `<section class="idom"><div class="irow"><div><b>${esc(d.title)}</b><small>${esc(dnote)}</small></div>${seg(d.id, dv, `${d.title} interest`)}</div>${topics}</section>`;
@@ -321,7 +322,7 @@ async function showInterests(): Promise<void> {
   renderInterests();
 }
 
-async function setInterest(key: string, value: Interest): Promise<void> {
+async function setInterest(key: string, value: Interest | 'inherit'): Promise<void> {
   try {
     await putInterest({ key, value });
     renderInterests();

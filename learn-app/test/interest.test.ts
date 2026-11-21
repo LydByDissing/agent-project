@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 
 const execFileAsync = promisify(execFile);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +66,7 @@ function fixture(learner?: object) {
   cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
   addTlsTopic(project);
   if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
-  const app = createApp({
+  const app = makeApp({
     project,
     distDir: project,
     home,

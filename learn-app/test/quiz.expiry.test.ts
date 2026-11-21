@@ -8,7 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ClaudeExitError, parseQuiz, claudeOpts } from '../src/quiz/quiz.js';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEARN_APP = resolve(HERE, '..');
@@ -47,7 +47,7 @@ function server(bin: string = FAKE) {
   cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
   writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [] }));
   let clock = Date.parse('2026-11-21T10:00:00Z');
-  const app = createApp({
+  const app = makeApp({
     project,
     distDir: project,
     home,

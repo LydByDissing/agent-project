@@ -5,13 +5,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 import { PathEscapeError, resolveUnder } from '../src/server/paths.js';
 
 const dist = mkdtempSync(join(tmpdir(), 'learn-dist-'));
 writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
 writeFileSync(join(dist, '..', 'secret.txt'), 'secret');
-const app = createApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-home-')) });
+const app = makeApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-home-')) });
 
 describe('server app', () => {
   it('reports health', async () => {

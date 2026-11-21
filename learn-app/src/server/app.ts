@@ -1,6 +1,6 @@
-// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011,REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Builds the Hono app: JSON API (now, learner, interest, tree, next, lesson, asset, quiz, answer) plus static serving of the built SPA.[/intent]
-//   [inv]Every project path served (lessons, SVG assets, now.json) resolves under the project root via resolveUnder; PUT /api/interest writes nothing unless every key and value validates.[/inv]
+//   [inv]Every project path served (lessons, SVG assets, now.json) resolves under the project root via resolveUnder; PUT /api/interest writes nothing unless every key and value validates; no route answers a request whose Host is not 127.0.0.1:<port> or localhost:<port>.[/inv]
 // [/origin]
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -15,6 +15,8 @@ import { type Interest, learnHome, readLearner, updateLearner } from '../state/l
 import { PathEscapeError, resolveUnder } from './paths.js';
 
 export interface AppOptions {
+  /** Port the server listens on; the guard only accepts Host 127.0.0.1:<port> or localhost:<port>. */
+  port: number;
   project: string;
   distDir: string;
   /** Directory holding learner.json; defaults to $SDD_LEARN_HOME or ~/.sdd. */
@@ -39,6 +41,8 @@ interface QuizState {
 const MISS_LIMIT = 5;
 const QUIZ_TTL_MS = 60 * 60 * 1000;
 const INTEREST_VALUES: readonly Interest[] = ['deep', 'basics', 'skip'];
+const JSON_TYPE = /^application\/json\s*(;|$)/i;
+const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 const short = (q: string): string => (q.length > 90 ? `${q.slice(0, 89)}…` : q);
 
 const NOW_FILE = '.sdd/now.json';
@@ -74,7 +78,7 @@ function interestKeys(lib: Library): Set<string> {
   return new Set(lib.domains.flatMap((d) => [d.id, ...d.topics.map((t) => t.id)]));
 }
 
-export function createApp({ project, distDir, home, today: todayFn = today, claude = claudeOpts, now = Date.now }: AppOptions): Hono {
+export function createApp({ port, project, distDir, home, today: todayFn = today, claude = claudeOpts, now = Date.now }: AppOptions): Hono {
   const app = new Hono();
   const quizzes = new Map<string, QuizState>();
   const homeDir = (): string => home ?? learnHome();
@@ -82,6 +86,19 @@ export function createApp({ project, distDir, home, today: todayFn = today, clau
   const evictQuizzes = (at: number): void => {
     for (const [id, q] of quizzes) if (at - q.createdAt > QUIZ_TTL_MS) quizzes.delete(id);
   };
+
+  const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  app.use('*', async (c, next) => {
+    const host = c.req.header('host');
+    if (host === undefined || !hosts.has(host.toLowerCase())) return c.json({ error: 'forbidden_host', message: 'Host must be 127.0.0.1 or localhost on the server port' }, 403);
+    const origin = c.req.header('origin');
+    if (origin !== undefined && !origins.has(origin.toLowerCase())) return c.json({ error: 'forbidden_origin', message: 'cross-origin requests are not allowed' }, 403);
+    if (WRITE_METHODS.has(c.req.method) && !JSON_TYPE.test(c.req.header('content-type') ?? '')) {
+      return c.json({ error: 'unsupported_media_type', message: 'writes must send Content-Type: application/json' }, 415);
+    }
+    await next();
+  });
 
   app.onError((err, c) => {
     if (err instanceof ClaudeMissingError || err instanceof ClaudeExitError || err instanceof QuizSchemaError || err instanceof UnknownSourceError) {
@@ -118,12 +135,17 @@ export function createApp({ project, distDir, home, today: todayFn = today, clau
     const known = interestKeys(library());
     for (const [key, value] of pairs) {
       if (!known.has(key)) return c.json({ error: 'unknown_key', key, message: `unknown interest key ${JSON.stringify(key)}: use a domain or domain/topic in learn/` }, 400);
-      if (!INTEREST_VALUES.includes(value as Interest)) {
-        return c.json({ error: 'bad_value', key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be deep, basics or skip` }, 400);
+      const inheritOk = value === 'inherit' && key.includes('/');
+      if (!inheritOk && !INTEREST_VALUES.includes(value as Interest)) {
+        const allowed = key.includes('/') ? 'deep, basics, skip or inherit' : 'deep, basics or skip';
+        return c.json({ error: 'bad_value', key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be ${allowed}` }, 400);
       }
     }
     const next = await updateLearner(homeDir(), (cur) => {
-      for (const [key, value] of pairs) cur.interest[key] = value as Interest;
+      for (const [key, value] of pairs) {
+        if (value === 'inherit') delete cur.interest[key];
+        else cur.interest[key] = value as Interest;
+      }
     });
     return c.json({ interest: next.interest });
   });
@@ -231,14 +253,14 @@ export function createApp({ project, distDir, home, today: todayFn = today, clau
     if (quiz.chosen[qi] !== undefined) return c.json({ error: 'already_answered' }, 409);
     quiz.chosen[qi] = chosen;
     const day = todayFn();
-    const now = new Date().toISOString();
+    const answeredAt = new Date().toISOString();
     const done = quiz.chosen.every((x) => x !== undefined);
     const allCorrect = done && quiz.chosen.every((x, i) => x === quiz.questions[i].correct);
     const srcIdx = quiz.keys.indexOf(q.source);
     let result: { box: number; due: string } | undefined;
     try {
       await updateLearner(homeDir(), (cur) => {
-      cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: now, explanation: q.options[chosen].explanation, source: q.source });
+      cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: answeredAt, explanation: q.options[chosen].explanation, source: q.source });
       if (done) {
         result = leitner(cur.mastery[quiz.lessonId]?.box ?? 0, allCorrect, day);
         cur.mastery[quiz.lessonId] = result;

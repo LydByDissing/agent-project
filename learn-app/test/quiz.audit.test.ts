@@ -14,7 +14,7 @@ import {
   ClaudeExitError, ClaudeMissingError, QuizSchemaError, UnknownSourceError,
   buildPrompt, claudeOpts, generateQuiz, parseQuiz,
 } from '../src/quiz/quiz.js';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 import { INTERVAL_DAYS, leitner } from '../src/state/leitner.js';
 import { readLearner, updateLearner } from '../src/state/learner.js';
 
@@ -67,7 +67,7 @@ function server(learner: Record<string, unknown> = {}, today = '2026-11-21') {
     join(home, 'learner.json'),
     JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [], ...learner }),
   );
-  const app = createApp({ project, distDir: project, home, today: () => today });
+  const app = makeApp({ project, distDir: project, home, today: () => today });
   const post = (p: string, body?: unknown) =>
     app.request(p, {
       method: 'POST',
@@ -491,7 +491,7 @@ describe('SPA bundle quiz wiring', () => {
   it('bundle starts POST /api/quiz/<id> after rendering the lesson quiz section', () => {
     const b = bundle();
     const section = b.indexOf('id="quiz"');
-    const request = b.search(/\/api\/quiz\/\$\{[\w$]+\}`,\{method:"POST"\}/);
+    const request = b.search(/\/api\/quiz\/\$\{[\w$]+\}`,\{method:"POST",headers:\{"Content-Type":"application\/json"\}\}/);
     expect(section, 'quiz section not rendered in bundle').toBeGreaterThan(-1);
     expect(request, 'POST /api/quiz request not found in bundle').toBeGreaterThan(-1);
     expect(request).toBeGreaterThan(section);
@@ -537,7 +537,7 @@ describe('bundled server.js with the fake CLI', () => {
   });
 
   it('POST /api/quiz through the bundled server runs the fake CLI and returns 3 questions', async () => {
-    const res = await fetch(`${base}/api/quiz/${LESSON}`, { method: 'POST' });
+    const res = await fetch(`${base}/api/quiz/${LESSON}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const body = (await res.json()) as any;
     expect(res.status).toBe(200);
     expect(body.questions).toHaveLength(3);

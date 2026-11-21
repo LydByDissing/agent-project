@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(LEARN_APP, '..');
@@ -24,7 +24,7 @@ function fixture() {
   const home = tmp();
   const distDir = tmp();
   cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-  const app = createApp({ project, distDir, home });
+  const app = makeApp({ project, distDir, home });
   const writeNow = (jobs: Job[]): void => {
     mkdirSync(join(project, '.sdd'), { recursive: true });
     writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify({ run: 'r1', wave: 1, jobs }));

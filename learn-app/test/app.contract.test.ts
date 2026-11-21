@@ -5,15 +5,15 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 import { PathEscapeError, resolveUnder } from '../src/server/paths.js';
 
-let app: ReturnType<typeof createApp>;
+let app: ReturnType<typeof makeApp>;
 
 beforeAll(() => {
   const dist = mkdtempSync(join(tmpdir(), 'learn-contract-dist-'));
   writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
-  app = createApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-contract-home-')) });
+  app = makeApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-contract-home-')) });
 });
 
 describe('API contract', () => {
@@ -36,7 +36,7 @@ describe('API contract', () => {
   });
 
   it('POST to health is not routed as a GET and returns 404', async () => {
-    const res = await app.request('/api/health', { method: 'POST' });
+    const res = await app.request('/api/health', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     expect(res.status).toBe(404);
   });
 });

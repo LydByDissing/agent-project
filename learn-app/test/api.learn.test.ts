@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(LEARN_APP, '..');
@@ -23,7 +23,7 @@ function fixture(learner?: object, now?: object) {
     writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify(now));
   }
   if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
-  const app = createApp({ project, distDir: project, home });
+  const app = makeApp({ project, distDir: project, home });
   return { project, home, app, get: async (p: string) => app.request(p) };
 }
 const NOW = {

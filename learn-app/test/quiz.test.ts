@@ -10,7 +10,7 @@ import {
   ClaudeExitError, ClaudeMissingError, ClaudeTimeoutError, QuizSchemaError, UnknownSourceError,
   buildPrompt, generateQuiz, parseQuiz, runClaude,
 } from '../src/quiz/quiz.js';
-import { createApp } from '../src/server/app.js';
+import { makeApp } from './helpers/app.js';
 import { leitner } from '../src/state/leitner.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -135,7 +135,7 @@ function server(learner: object) {
   const home = tmp();
   cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true });
   writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [], ...learner }));
-  const app = createApp({ project, distDir: project, home, today: () => '2026-11-21' });
+  const app = makeApp({ project, distDir: project, home, today: () => '2026-11-21' });
   const post = (p: string, body?: unknown) =>
     app.request(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const state = () => JSON.parse(readFileSync(join(home, 'learner.json'), 'utf8'));
