@@ -156,3 +156,10 @@ section.quiz{background:var(--surface);border:1px solid var(--line);border-radiu
 
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:var(--r);font-size:13px;z-index:20;max-width:calc(100% - 32px)}
 .poc{font-family:var(--f-mono);font-size:11px;color:var(--faint);text-align:center}
+.nav{display:flex;gap:14px;font-size:13px}
+.nav a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}
+.nav a[aria-current="page"]{color:var(--fg);border-bottom-color:var(--accent)}
+.idom{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.idom>.irow{border-top:0}
+.itopic{padding-left:18px}
+.toast[data-bad="true"]{background:var(--bad);color:var(--surface)}

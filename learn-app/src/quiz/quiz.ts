@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009 c4=learn_app/question_generator]
+// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009 c4=learn_app/question_generator]
 //   [intent]Builds the personalised quiz prompt, runs headless claude -p, and strictly validates the returned 3 questions or throws a named error.[/intent]
 //   [inv]Never returns placeholder or cached questions; every failure is one of the named errors.[/inv]
 // [/origin]
@@ -45,8 +45,8 @@ export class ClaudeTimeoutError extends Error {
   }
 }
 export class ClaudeExitError extends Error {
-  constructor(readonly code: number | null, readonly stderr: string) {
-    super(`claude -p failed (exit ${code}): ${stderr.slice(-400).trim() || 'no stderr'}`);
+  constructor(readonly code: number | null, readonly stderr: string, message?: string) {
+    super(message ?? `claude -p failed (exit ${code}): ${stderr.slice(-400).trim() || 'no stderr'}`);
     this.name = 'ClaudeExitError';
   }
 }
@@ -143,8 +143,12 @@ function modelText(stdout: string): string {
     throw new QuizSchemaError(`claude stdout is not a JSON envelope: ${stdout.slice(0, 120)}`);
   }
   if (env === null || typeof env !== 'object') throw new QuizSchemaError('claude envelope is not an object');
-  const e = env as { is_error?: unknown; result?: unknown };
-  if (e.is_error === true) throw new ClaudeExitError(0, typeof e.result === 'string' ? e.result : 'is_error set in envelope');
+  const e = env as { is_error?: unknown; result?: unknown; error?: unknown; subtype?: unknown };
+  if (e.is_error === true) {
+    const detail = [e.result, e.error, e.subtype].find((v) => typeof v === 'string' && v.trim() !== '') as string | undefined;
+    const text = detail?.trim() ?? 'no error text in envelope';
+    throw new ClaudeExitError(null, text, `claude -p reported an error (is_error in its JSON envelope): ${text.slice(-400)}`);
+  }
   if (typeof e.result !== 'string') throw new QuizSchemaError('claude envelope has no string "result"');
   return e.result;
 }

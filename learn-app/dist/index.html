@@ -1,4 +1,7 @@
 <!doctype html>
+<!-- [origin ref=llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
+  [intent]Static shell for the SPA: header nav (Lesson / Interests), the wave strip, the topic tree and the toast element.[/intent]
+[/origin] -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -7,13 +10,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
-  <script type="module" crossorigin src="./assets/index-as13fkRg.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-ExwrczEw.css">
+  <script type="module" crossorigin src="./assets/index-D8b5UHCK.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BximZGh9.css">
 </head>
 <body>
 <header class="top">
   <div class="top-in">
     <div class="brand">SDD Learn</div>
+    <nav class="nav" aria-label="Views"><a href="#lesson" data-nav="lesson">Lesson</a><a href="#interests" data-nav="interests">Interests</a></nav>
     <div class="wave" id="wave" aria-live="polite"></div>
   </div>
 </header>
@@ -32,5 +36,6 @@
   </aside>
   <main id="app">Loading lessons...</main>
 </div>
+<div class="toast" id="toast" role="status" hidden></div>
 </body>
 </html>

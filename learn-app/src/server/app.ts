@@ -1,6 +1,6 @@
-// [origin ref=llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
-//   [intent]Builds the Hono app: JSON API (now, learner, tree, next, lesson, asset, quiz, answer) plus static serving of the built SPA.[/intent]
-//   [inv]Every project path served (lessons, SVG assets, now.json) resolves under the project root via resolveUnder.[/inv]
+// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+//   [intent]Builds the Hono app: JSON API (now, learner, interest, tree, next, lesson, asset, quiz, answer) plus static serving of the built SPA.[/intent]
+//   [inv]Every project path served (lessons, SVG assets, now.json) resolves under the project root via resolveUnder; PUT /api/interest writes nothing unless every key and value validates.[/inv]
 // [/origin]
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import { MASTERED_BOX, type Now, interestFor, prerequisitesMet, select, visibleA
 import { randomUUID } from 'node:crypto';
 import { type ClaudeOpts, type QuizQuestion, ClaudeExitError, ClaudeMissingError, ClaudeTimeoutError, QuizSchemaError, UnknownSourceError, claudeOpts, generateQuiz, sourceKeys } from '../quiz/quiz.js';
 import { leitner } from '../state/leitner.js';
-import { learnHome, readLearner, updateLearner } from '../state/learner.js';
+import { type Interest, learnHome, readLearner, updateLearner } from '../state/learner.js';
 import { PathEscapeError, resolveUnder } from './paths.js';
 
 export interface AppOptions {
@@ -23,6 +23,8 @@ export interface AppOptions {
   today?: () => string;
   /** Claude CLI options, resolved per request; defaults to SDD_LEARN_* env. */
   claude?: () => ClaudeOpts;
+  /** Epoch milliseconds; defaults to Date.now. Drives quiz expiry. */
+  now?: () => number;
 }
 
 interface QuizState {
@@ -31,9 +33,12 @@ interface QuizState {
   keys: string[];
   sources: Array<{ title: string; url?: string; path?: string; line?: number }>;
   chosen: Array<number | undefined>;
+  createdAt: number;
 }
 
 const MISS_LIMIT = 5;
+const QUIZ_TTL_MS = 60 * 60 * 1000;
+const INTEREST_VALUES: readonly Interest[] = ['deep', 'basics', 'skip'];
 const short = (q: string): string => (q.length > 90 ? `${q.slice(0, 89)}…` : q);
 
 const NOW_FILE = '.sdd/now.json';
@@ -65,11 +70,18 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-export function createApp({ project, distDir, home, today: todayFn = today, claude = claudeOpts }: AppOptions): Hono {
+function interestKeys(lib: Library): Set<string> {
+  return new Set(lib.domains.flatMap((d) => [d.id, ...d.topics.map((t) => t.id)]));
+}
+
+export function createApp({ project, distDir, home, today: todayFn = today, claude = claudeOpts, now = Date.now }: AppOptions): Hono {
   const app = new Hono();
   const quizzes = new Map<string, QuizState>();
   const homeDir = (): string => home ?? learnHome();
   const library = (): Library => loadLibrary(project);
+  const evictQuizzes = (at: number): void => {
+    for (const [id, q] of quizzes) if (at - q.createdAt > QUIZ_TTL_MS) quizzes.delete(id);
+  };
 
   app.onError((err, c) => {
     if (err instanceof ClaudeMissingError || err instanceof ClaudeExitError || err instanceof QuizSchemaError || err instanceof UnknownSourceError) {
@@ -87,6 +99,34 @@ export function createApp({ project, distDir, home, today: todayFn = today, clau
   app.get('/api/now', (c) => c.json(readNow(project)));
 
   app.get('/api/learner', (c) => c.json(readLearner(homeDir())));
+
+  app.get('/api/interest', (c) => {
+    const lib = library();
+    return c.json({
+      interest: readLearner(homeDir()).interest,
+      domains: lib.domains.map((d) => ({ id: d.id, title: d.title, topics: d.topics.map((t) => ({ id: t.id, title: t.title })) })),
+    });
+  });
+
+  app.put('/api/interest', async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as unknown;
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'bad_body', message: 'body must be {key, value} or a map of key to value' }, 400);
+    }
+    const rec = body as Record<string, unknown>;
+    const pairs: Array<[string, unknown]> = typeof rec.key === 'string' && 'value' in rec ? [[rec.key, rec.value]] : Object.entries(rec);
+    const known = interestKeys(library());
+    for (const [key, value] of pairs) {
+      if (!known.has(key)) return c.json({ error: 'unknown_key', key, message: `unknown interest key ${JSON.stringify(key)}: use a domain or domain/topic in learn/` }, 400);
+      if (!INTEREST_VALUES.includes(value as Interest)) {
+        return c.json({ error: 'bad_value', key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be deep, basics or skip` }, 400);
+      }
+    }
+    const next = await updateLearner(homeDir(), (cur) => {
+      for (const [key, value] of pairs) cur.interest[key] = value as Interest;
+    });
+    return c.json({ interest: next.interest });
+  });
 
   app.get('/api/tree', (c) => {
     const learner = readLearner(homeDir());
@@ -159,20 +199,21 @@ export function createApp({ project, distDir, home, today: todayFn = today, clau
     } catch {
       return c.json({ error: 'not_found' }, 404);
     }
+    evictQuizzes(now());
     if (!ID_PATH.test(id) || !existsSync(join(project, 'learn'))) return c.json({ error: 'not_found' }, 404);
     const lesson = library().lessons.find((l) => l.id === id);
     if (!lesson) return c.json({ error: 'not_found' }, 404);
     const learner = readLearner(homeDir());
     const misses = [...new Set(learner.history.filter((h) => h.lesson === id && h.chosen !== h.correct).map((h) => h.q))].slice(-MISS_LIMIT);
     const slice = { box: learner.mastery[id]?.box ?? 0, interest: interestFor(learner, lesson.domain, lesson.topic), misses };
-    const started = Date.now();
+    const started = now();
     const questions = await generateQuiz(lesson, slice, claude());
     const quizId = randomUUID();
     const keys = sourceKeys(lesson.sources);
-    quizzes.set(quizId, { lessonId: id, questions, keys, sources: lesson.sources, chosen: questions.map(() => undefined) });
+    quizzes.set(quizId, { lessonId: id, questions, keys, sources: lesson.sources, chosen: questions.map(() => undefined), createdAt: now() });
     return c.json({
       quizId,
-      seconds: Math.round((Date.now() - started) / 100) / 10,
+      seconds: Math.round((now() - started) / 100) / 10,
       persona: { box: slice.box, interest: slice.interest, misses },
       questions: questions.map((q) => ({ q: q.q, options: q.options.map((o) => o.text) })),
     });

@@ -10409,8 +10409,8 @@ var ClaudeTimeoutError = class extends Error {
   }
 };
 var ClaudeExitError = class extends Error {
-  constructor(code, stderr) {
-    super(`claude -p failed (exit ${code}): ${stderr.slice(-400).trim() || "no stderr"}`);
+  constructor(code, stderr, message) {
+    super(message ?? `claude -p failed (exit ${code}): ${stderr.slice(-400).trim() || "no stderr"}`);
     this.code = code;
     this.stderr = stderr;
     this.name = "ClaudeExitError";
@@ -10501,7 +10501,11 @@ function modelText(stdout) {
   }
   if (env === null || typeof env !== "object") throw new QuizSchemaError("claude envelope is not an object");
   const e = env;
-  if (e.is_error === true) throw new ClaudeExitError(0, typeof e.result === "string" ? e.result : "is_error set in envelope");
+  if (e.is_error === true) {
+    const detail = [e.result, e.error, e.subtype].find((v) => typeof v === "string" && v.trim() !== "");
+    const text = detail?.trim() ?? "no error text in envelope";
+    throw new ClaudeExitError(null, text, `claude -p reported an error (is_error in its JSON envelope): ${text.slice(-400)}`);
+  }
   if (typeof e.result !== "string") throw new QuizSchemaError('claude envelope has no string "result"');
   return e.result;
 }
@@ -10590,6 +10594,8 @@ function resolveUnder(root, requested) {
 
 // src/server/app.ts
 var MISS_LIMIT = 5;
+var QUIZ_TTL_MS = 60 * 60 * 1e3;
+var INTEREST_VALUES = ["deep", "basics", "skip"];
 var short = (q) => q.length > 90 ? `${q.slice(0, 89)}\u2026` : q;
 var NOW_FILE = ".sdd/now.json";
 var ID_PATH = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/i;
@@ -10615,11 +10621,17 @@ var MIME = {
   ".woff2": "font/woff2",
   ".ico": "image/x-icon"
 };
-function createApp({ project, distDir: distDir2, home, today: todayFn = today, claude = claudeOpts }) {
+function interestKeys(lib) {
+  return new Set(lib.domains.flatMap((d) => [d.id, ...d.topics.map((t) => t.id)]));
+}
+function createApp({ project, distDir: distDir2, home, today: todayFn = today, claude = claudeOpts, now = Date.now }) {
   const app = new Hono3();
   const quizzes = /* @__PURE__ */ new Map();
   const homeDir = () => home ?? learnHome();
   const library = () => loadLibrary(project);
+  const evictQuizzes = (at) => {
+    for (const [id, q] of quizzes) if (at - q.createdAt > QUIZ_TTL_MS) quizzes.delete(id);
+  };
   app.onError((err, c) => {
     if (err instanceof ClaudeMissingError || err instanceof ClaudeExitError || err instanceof QuizSchemaError || err instanceof UnknownSourceError) {
       return c.json({ error: { name: err.name, message: err.message } }, 502);
@@ -10633,6 +10645,32 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
   app.get("/api/health", (c) => c.json({ ok: true }));
   app.get("/api/now", (c) => c.json(readNow(project)));
   app.get("/api/learner", (c) => c.json(readLearner(homeDir())));
+  app.get("/api/interest", (c) => {
+    const lib = library();
+    return c.json({
+      interest: readLearner(homeDir()).interest,
+      domains: lib.domains.map((d) => ({ id: d.id, title: d.title, topics: d.topics.map((t) => ({ id: t.id, title: t.title })) }))
+    });
+  });
+  app.put("/api/interest", async (c) => {
+    const body = await c.req.json().catch(() => void 0);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "bad_body", message: "body must be {key, value} or a map of key to value" }, 400);
+    }
+    const rec = body;
+    const pairs = typeof rec.key === "string" && "value" in rec ? [[rec.key, rec.value]] : Object.entries(rec);
+    const known = interestKeys(library());
+    for (const [key, value] of pairs) {
+      if (!known.has(key)) return c.json({ error: "unknown_key", key, message: `unknown interest key ${JSON.stringify(key)}: use a domain or domain/topic in learn/` }, 400);
+      if (!INTEREST_VALUES.includes(value)) {
+        return c.json({ error: "bad_value", key, value, message: `value ${JSON.stringify(value)} for ${JSON.stringify(key)} must be deep, basics or skip` }, 400);
+      }
+    }
+    const next = await updateLearner(homeDir(), (cur) => {
+      for (const [key, value] of pairs) cur.interest[key] = value;
+    });
+    return c.json({ interest: next.interest });
+  });
   app.get("/api/tree", (c) => {
     const learner = readLearner(homeDir());
     const lib = library();
@@ -10701,20 +10739,21 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
     } catch {
       return c.json({ error: "not_found" }, 404);
     }
+    evictQuizzes(now());
     if (!ID_PATH.test(id) || !existsSync3(join3(project, "learn"))) return c.json({ error: "not_found" }, 404);
     const lesson = library().lessons.find((l) => l.id === id);
     if (!lesson) return c.json({ error: "not_found" }, 404);
     const learner = readLearner(homeDir());
     const misses = [...new Set(learner.history.filter((h) => h.lesson === id && h.chosen !== h.correct).map((h) => h.q))].slice(-MISS_LIMIT);
     const slice = { box: learner.mastery[id]?.box ?? 0, interest: interestFor(learner, lesson.domain, lesson.topic), misses };
-    const started = Date.now();
+    const started = now();
     const questions = await generateQuiz(lesson, slice, claude());
     const quizId = randomUUID();
     const keys = sourceKeys(lesson.sources);
-    quizzes.set(quizId, { lessonId: id, questions, keys, sources: lesson.sources, chosen: questions.map(() => void 0) });
+    quizzes.set(quizId, { lessonId: id, questions, keys, sources: lesson.sources, chosen: questions.map(() => void 0), createdAt: now() });
     return c.json({
       quizId,
-      seconds: Math.round((Date.now() - started) / 100) / 10,
+      seconds: Math.round((now() - started) / 100) / 10,
       persona: { box: slice.box, interest: slice.interest, misses },
       questions: questions.map((q) => ({ q: q.q, options: q.options.map((o) => o.text) }))
     });
@@ -10731,14 +10770,14 @@ function createApp({ project, distDir: distDir2, home, today: todayFn = today, c
     if (quiz.chosen[qi] !== void 0) return c.json({ error: "already_answered" }, 409);
     quiz.chosen[qi] = chosen;
     const day = todayFn();
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const done = quiz.chosen.every((x) => x !== void 0);
     const allCorrect = done && quiz.chosen.every((x, i) => x === quiz.questions[i].correct);
     const srcIdx = quiz.keys.indexOf(q.source);
     let result;
     try {
       await updateLearner(homeDir(), (cur) => {
-        cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: now, explanation: q.options[chosen].explanation, source: q.source });
+        cur.history.push({ lesson: quiz.lessonId, q: short(q.q), chosen, correct: q.correct, at: now2, explanation: q.options[chosen].explanation, source: q.source });
         if (done) {
           result = leitner(cur.mastery[quiz.lessonId]?.box ?? 0, allCorrect, day);
           cur.mastery[quiz.lessonId] = result;

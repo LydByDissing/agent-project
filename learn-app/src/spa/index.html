@@ -1,4 +1,7 @@
 <!doctype html>
+<!-- [origin ref=llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
+  [intent]Static shell for the SPA: header nav (Lesson / Interests), the wave strip, the topic tree and the toast element.[/intent]
+[/origin] -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -12,6 +15,7 @@
 <header class="top">
   <div class="top-in">
     <div class="brand">SDD Learn</div>
+    <nav class="nav" aria-label="Views"><a href="#lesson" data-nav="lesson">Lesson</a><a href="#interests" data-nav="interests">Interests</a></nav>
     <div class="wave" id="wave" aria-live="polite"></div>
   </div>
 </header>
@@ -30,6 +34,7 @@
   </aside>
   <main id="app">Loading lessons...</main>
 </div>
+<div class="toast" id="toast" role="status" hidden></div>
 <script type="module" src="./main.ts"></script>
 </body>
 </html>

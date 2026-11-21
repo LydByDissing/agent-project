@@ -1,6 +1,6 @@
-// [origin ref=llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
-//   [intent]Renders wave strip, topic tree, what-changed note, learner.json peek, the selected lesson and its live quiz (prefetched, graded server-side) from the JSON API, polling /api/now every 2s.[/intent]
-//   [inv]The SPA only talks to the server's JSON API; Markdown HTML is escaped, never injected raw.[/inv]
+// [origin ref=llm-dsl-gu1y.9,llm-dsl-gu1y.5,llm-dsl-gu1y.7 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009,REQ-OPERATOR-EDU-010 c4=learn_app/learn_spa]
+//   [intent]Renders the wave strip, topic tree, lesson with its live quiz, the interest onboarding and settings view, and the more-like-this / basics / not-for-me controls, all from the JSON API.[/intent]
+//   [inv]The SPA only talks to the server's JSON API; Markdown HTML is escaped, never injected raw; an empty interest map on load always routes to the onboarding view.[/inv]
 // [/origin]
 import { Marked } from 'marked';
 import './style.css';
@@ -17,6 +17,8 @@ interface LessonDoc {
   topic_position: number; topic_size: number; requires: Array<{ id: string; title: string; mastered: boolean }>;
   sources: Source[]; updated: string; body: string;
 }
+type Interest = 'deep' | 'basics' | 'skip';
+interface InterestDoc { interest: Record<string, Interest>; domains: Array<{ id: string; title: string; topics: Array<{ id: string; title: string }> }> }
 interface NextDoc { lesson: { id: string } | null; reason: string; what_changed: Array<{ topic: string; jobs: Array<{ id: string; title: string; status: string }> }> }
 
 const $ = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
@@ -58,6 +60,10 @@ let current: string | null = null;
 let nextDoc: NextDoc | null = null;
 let nowDoc: NowDoc = { jobs: [] };
 let tree: TreeDomain[] = [];
+let interests: InterestDoc | null = null;
+let currentDoc: LessonDoc | null = null;
+let firstRun = false;
+let toastTimer: number | undefined;
 
 function renderWave(): void {
   const jobs = nowDoc.jobs;
@@ -116,6 +122,8 @@ function sourceRow(s: Source): string {
 async function showLesson(id: string, why: string): Promise<void> {
   const lesson = await getJson<LessonDoc>(`/api/lesson/${id}`);
   current = lesson.id;
+  currentDoc = lesson;
+  firstRun = false;
   const reqs = lesson.requires.length
     ? `<span>requires ${lesson.requires.map((r) => `<a href="#lesson/${esc(r.id)}">${esc(r.title)}</a> · ${r.mastered ? 'mastered' : 'not yet mastered'}`).join(', ')}</span>` : '';
   $('app').innerHTML = `
@@ -127,6 +135,11 @@ async function showLesson(id: string, why: string): Promise<void> {
       <div class="prose" id="prose">${renderMarkdown(lesson)}</div>
       <div class="sources"><div class="label">Sources</div><ol>${lesson.sources.map(sourceRow).join('')}</ol></div>
     </article>
+    <div class="react" aria-label="How much of this do you want">
+      <button class="btn" type="button" data-int="deep">More like this</button>
+      <button class="btn" type="button" data-int="basics">Basics are enough</button>
+      <button class="btn quiet" type="button" data-int="skip">Not for me</button>
+    </div>
     <section class="quiz" id="quiz">
       <div class="qhead"><h2>Check yourself</h2><div class="gen" id="gen"></div></div>
       <div class="persona" id="persona" hidden></div>
@@ -255,11 +268,129 @@ function wireDiagrams(): void {
   });
 }
 
+async function refreshTree(): Promise<void> {
+  tree = (await getJson<{ domains: TreeDomain[] }>('/api/tree')).domains;
+  renderTree();
+}
+
+async function putInterest(body: { key: string; value: Interest }): Promise<void> {
+  const res = await fetch('/api/interest', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = (await res.json()) as { interest?: Record<string, Interest>; message?: string; error?: string };
+  if (!res.ok) throw new Error(data.message ?? data.error ?? `PUT /api/interest: ${res.status}`);
+  if (interests && data.interest) interests.interest = data.interest;
+}
+
+function notify(msg: string, bad = false): void {
+  const t = $('toast');
+  t.textContent = msg;
+  t.dataset.bad = String(bad);
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (t.hidden = true), 2600);
+}
+
+const seg = (key: string, own: Interest | undefined, label: string): string =>
+  `<div class="seg" role="group" aria-label="${esc(label)}">${(['deep', 'basics', 'skip'] as const)
+    .map((v) => `<button type="button" data-k="${esc(key)}" data-v="${v}" aria-pressed="${own === v}">${v}</button>`).join('')}</div>`;
+
+function renderInterests(): void {
+  if (!interests) return;
+  const { interest, domains } = interests;
+  const intro = firstRun
+    ? '<div class="label">First run · also under Interests at any time</div><h1>What do you want to get better at?</h1>'
+    : '<div class="label">Settings</div><h1>Interests</h1>';
+  const rows = domains.map((d) => {
+    const dv = interest[d.id];
+    const topics = d.topics.map((t) => {
+      const tv = interest[t.id];
+      const note = tv ? 'set for this topic' : `inherits ${dv ?? 'basics'}`;
+      return `<div class="irow itopic"><div><span class="mono">${esc(t.title)}</span><small>${esc(note)}</small></div>${seg(t.id, tv, `${t.title} interest`)}</div>`;
+    }).join('');
+    const dnote = `${dv ? 'set for this domain' : 'not set yet, basics applies'} · ${d.topics.length} topics`;
+    return `<section class="idom"><div class="irow"><div><b>${esc(d.title)}</b><small>${esc(dnote)}</small></div>${seg(d.id, dv, `${d.title} interest`)}</div>${topics}</section>`;
+  }).join('');
+  $('app').innerHTML = `<section class="onb">${intro}
+    <p>These domains appear in this project's plan. Deep gets every level, basics stops at intro lessons, and skip never shows lessons, only a one-line note when agents change something there. Your choices are saved in <span class="mono">~/.sdd/learner.json</span> and apply to every project.</p>
+    <div id="irows">${rows || '<p>No domains found in learn/.</p>'}</div>
+    <div class="react"><a class="btn primary" href="#lesson" style="text-decoration:none">Save and show my next lesson</a></div>
+  </section>`;
+}
+
+async function showInterests(): Promise<void> {
+  interests = await getJson<InterestDoc>('/api/interest');
+  renderInterests();
+}
+
+async function setInterest(key: string, value: Interest): Promise<void> {
+  try {
+    await putInterest({ key, value });
+    renderInterests();
+    await refreshTree();
+    notify(`${key} set to ${value}.`);
+  } catch (err) {
+    notify(`Could not save: ${(err as Error).message}`, true);
+  }
+}
+
+async function lessonAction(doc: LessonDoc, value: Interest): Promise<void> {
+  try {
+    await putInterest({ key: `${doc.domain}/${doc.topic}`, value });
+  } catch (err) {
+    notify(`Could not save: ${(err as Error).message}`, true);
+    return;
+  }
+  notify(
+    value === 'deep' ? `${doc.topic_title} set to deep.`
+      : value === 'basics' ? `${doc.topic_title} set to basics. Only intro lessons from now on.`
+      : `${doc.topic_title} skipped. You'll get a one-line note when agents touch it.`,
+  );
+  try {
+    nextDoc = await getJson<NextDoc>('/api/next');
+    await refreshTree();
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  renderChanged();
+  history.replaceState(null, '', nextDoc.lesson ? `#lesson/${nextDoc.lesson.id}` : '#lesson');
+  await showNext().catch(fail);
+}
+
+function onAppClick(e: Event): void {
+  const target = e.target as HTMLElement;
+  const k = target.closest('button[data-k]') as HTMLButtonElement | null;
+  if (k) {
+    void setInterest(k.dataset.k as string, k.dataset.v as Interest);
+    return;
+  }
+  const act = target.closest('button[data-int]') as HTMLButtonElement | null;
+  if (act && currentDoc) void lessonAction(currentDoc, act.dataset.int as Interest);
+}
+
 function route(): void {
+  const onInterests = location.hash === '#interests';
+  document.querySelectorAll<HTMLAnchorElement>('nav.nav a').forEach((a) => {
+    if (a.dataset.nav === (onInterests ? 'interests' : 'lesson')) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  if (onInterests) {
+    currentDoc = null;
+    void showInterests().catch(fail);
+    return;
+  }
   const m = /^#lesson\/(.+)$/.exec(location.hash);
   if (m) void showLesson(decodeURIComponent(m[1]), 'You opened this lesson from the tree.').catch(fail);
-  else if (nextDoc?.lesson) void showLesson(nextDoc.lesson.id, nextDoc.reason).catch(fail);
-  else $('app').innerHTML = `<div class="why">${esc(nextDoc?.reason ?? 'No lesson available.')}</div>`;
+  else void showNext().catch(fail);
+}
+
+async function showNext(): Promise<void> {
+  nextDoc = await getJson<NextDoc>('/api/next');
+  renderChanged();
+  if (nextDoc.lesson) await showLesson(nextDoc.lesson.id, nextDoc.reason);
+  else {
+    currentDoc = null;
+    $('app').innerHTML = `<div class="why">${esc(nextDoc.reason)}</div>`;
+  }
 }
 
 function fail(err: unknown): void {
@@ -284,11 +415,23 @@ async function pollNow(): Promise<void> {
 async function start(): Promise<void> {
   await pollNow();
   setInterval(() => void pollNow(), 2000);
+  $('app').addEventListener('click', onAppClick);
   try {
-    [tree, nextDoc] = await Promise.all([getJson<{ domains: TreeDomain[] }>('/api/tree').then((t) => t.domains), getJson<NextDoc>('/api/next')]);
+    const [t, n, i] = await Promise.all([
+      getJson<{ domains: TreeDomain[] }>('/api/tree'),
+      getJson<NextDoc>('/api/next'),
+      getJson<InterestDoc>('/api/interest'),
+    ]);
+    tree = t.domains;
+    nextDoc = n;
+    interests = i;
     renderTree();
     renderChanged();
     void refreshLearnerPeek();
+    if (Object.keys(i.interest).length === 0) {
+      firstRun = true;
+      history.replaceState(null, '', '#interests');
+    }
     route();
     addEventListener('hashchange', route);
   } catch (err) {
