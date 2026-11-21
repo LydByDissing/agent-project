@@ -1,8 +1,8 @@
-// [origin ref=llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Audits the JSON API against the t3 contract: now.json changes show on the next request (no caching), the wave run feeds what_changed, and only SVG assets under learn/ are served.[/intent]
 // [/origin]
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { makeApp } from './helpers/app.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(LEARN_APP, '..');
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-api-audit-'));
+const tmp = (): string => tmpDir('learn-api-audit-');
 
 interface Job {
   id: string;

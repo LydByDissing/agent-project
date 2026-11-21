@@ -1,45 +1,38 @@
-// [origin ref=llm-dsl-gu1y.1 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
-//   [intent]Verifies health, SPA serving, 404 path-traversal handling and unknown-lesson handling of the server app.[/intent]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.1 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
+//   [intent]Verifies health and encoded path-traversal handling of the server app against a secret file placed next to dist inside a private temp root.[/intent]
 // [/origin]
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
-import { PathEscapeError, resolveUnder } from '../src/server/paths.js';
+import { tmp } from './helpers/tmp.js';
 
-const dist = mkdtempSync(join(tmpdir(), 'learn-dist-'));
-writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
-writeFileSync(join(dist, '..', 'secret.txt'), 'secret');
-const app = makeApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-home-')) });
+let app: ReturnType<typeof makeApp>;
+
+beforeAll(() => {
+  // root/secret.txt sits exactly where ../secret.txt from root/dist resolves, so an escape would succeed if the guard failed.
+  const root = tmp('learn-app-root-');
+  const dist = join(root, 'dist');
+  mkdirSync(dist);
+  writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
+  writeFileSync(join(root, 'secret.txt'), 'secret');
+  app = makeApp({ project: dist, distDir: dist, home: tmp('learn-app-home-') });
+});
 
 describe('server app', () => {
   it('reports health', async () => {
     const res = await app.request('/api/health');
     expect(await res.json()).toEqual({ ok: true });
   });
-  it('serves the SPA shell at /', async () => {
-    const res = await app.request('/');
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain('SDD Learn');
-  });
   it('404s encoded traversal on the lesson API', async () => {
     const res = await app.request('/api/lesson/..%2F..%2Fetc%2Fpasswd');
     expect(res.status).toBe(404);
   });
-  it('404s traversal on static paths', async () => {
-    expect((await app.request('/..%2Fsecret.txt')).status).toBe(404);
-    expect((await app.request('/%2e%2e/secret.txt')).status).toBe(404);
-  });
-  it('404s an unknown lesson id', async () => {
-    expect((await app.request('/api/lesson/intro-01')).status).toBe(404);
-  });
-});
-
-describe('resolveUnder', () => {
-  it('allows children and rejects escapes', () => {
-    expect(resolveUnder('/a/b', 'c/d')).toBe('/a/b/c/d');
-    expect(() => resolveUnder('/a/b', '../x')).toThrow(PathEscapeError);
-    expect(() => resolveUnder('/a/b', 'c\0')).toThrow(PathEscapeError);
+  it('404s traversal on static paths and never returns the secret', async () => {
+    for (const p of ['/..%2Fsecret.txt', '/%2e%2e/secret.txt']) {
+      const res = await app.request(p);
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain('secret');
+    }
   });
 });

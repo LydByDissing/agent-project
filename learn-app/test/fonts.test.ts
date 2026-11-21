@@ -1,9 +1,9 @@
-// [origin ref=llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_spa]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_spa]
 //   [intent]Proves the built SPA is self-contained: no outside URLs in sources or dist, and every declared font file is shipped as woff2 with its license.[/intent]
 // [/origin]
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -17,7 +17,7 @@ function walk(dir: string): string[] {
 
 beforeAll(() => {
   // build into a tmp dir so the test checks current sources without touching the committed dist/
-  dist = mkdtempSync(join(tmpdir(), 'learn-fonts-dist-'));
+  dist = tmpDir('learn-fonts-dist-');
   execFileSync('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir'], { cwd: APP, stdio: 'pipe' });
 }, 120_000);
 

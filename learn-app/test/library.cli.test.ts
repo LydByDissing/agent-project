@@ -1,69 +1,20 @@
-// [origin ref=llm-dsl-gu1y.4 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.4 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Runs the bundled learn-app/cli.js as a child process to verify `learn validate` exit codes and named problems, and checks that no docs/source file includes or links into learn/.[/intent]
 // [/origin]
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { IAC, INDEX, lessonMd, makeLibProject, setMtime } from './helpers/library.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(LEARN_APP, '..');
 const CLI = join(LEARN_APP, 'cli.js');
 const DOCS_SOURCE = join(REPO, 'docs', 'source');
 
-const created: string[] = [];
-
-function makeProject(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), 'learn-cli-'));
-  created.push(root);
-  for (const [rel, text] of Object.entries(files)) {
-    const abs = join(root, rel);
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, text);
-  }
-  return root;
-}
-
-function setMtime(root: string, rel: string, when: Date): void {
-  utimesSync(join(root, rel), when, when);
-}
-
-afterAll(() => {
-  for (const root of created) rmSync(root, { recursive: true, force: true });
-});
-
-const INDEX = (title: string) => `title: ${title}\nsummary: Summary of ${title}.\n`;
-
-function lesson(id: string, opts: { level?: string; requires?: string[]; sources?: string; body?: string } = {}): string {
-  const requires = opts.requires ?? [];
-  const reqText = requires.length === 0 ? '[]' : '\n' + requires.map((r) => `  - ${r}`).join('\n');
-  const sources = opts.sources ?? '  - title: Spec\n    url: https://www.rfc-editor.org/rfc/rfc9110#name-etag';
-  return [
-    '---',
-    `id: ${id}`,
-    `title: Lesson ${id}`,
-    `level: ${opts.level ?? 'intro'}`,
-    `requires: ${reqText}`,
-    'sources:',
-    sources,
-    'updated: 2026-11-21',
-    '---',
-    opts.body ?? 'Body text for the lesson.',
-    '',
-  ].join('\n');
-}
-
-const IAC = {
-  'learn/iac/index.yaml': INDEX('Infrastructure as code'),
-  'learn/iac/terraform-state/index.yaml': INDEX('Terraform state'),
-  'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is'),
-  'learn/iac/terraform-state/02-remote-backends.md': lesson('iac/terraform-state/02-remote-backends', {
-    level: 'working',
-    requires: ['iac/terraform-state/01-what-state-is'],
-  }),
-};
+const makeProject = makeLibProject;
+const lesson = lessonMd;
 
 interface Run {
   code: number | null;
@@ -244,6 +195,10 @@ describe('learn validate (bundled cli.js): exit codes and named problems', () =>
     const r = spawnSync(process.execPath, [CLI, 'validate'], { encoding: 'utf8' });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('usage: node learn-app/cli.js validate --project <dir>');
+  });
+
+  it('exits 2 for an unknown subcommand', () => {
+    expect(spawnSync(process.execPath, [CLI, 'render'], { encoding: 'utf8' }).status).toBe(2);
   });
 });
 

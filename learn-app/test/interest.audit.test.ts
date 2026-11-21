@@ -1,24 +1,16 @@
-// [origin ref=llm-dsl-gu1y.10 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.10 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
 //   [intent]Audits the interest feature against REQ-OPERATOR-EDU-006: PUT /api/interest is atomic over partial maps, domain and topic skip semantics hold in selection, GET titles come from index.yaml, and the onboarding and lesson controls write the right keys when clicked in a real headless Chromium.[/intent]
 // [/origin]
-import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'yaml';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
+import { canRunChromium, closeAllPages, launchPage } from './helpers/browser.js';
+import { FAKE, REPO, makeProject, sleep, startLearnServer } from './helpers/server.js';
+import { tmp as tmpDir } from './helpers/tmp.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const LEARN_APP = resolve(HERE, '..');
-const REPO = resolve(LEARN_APP, '..');
-const FAKE = join(HERE, 'fixtures', 'fake-claude.mjs');
-const CHROMIUM = '/snap/bin/chromium';
-const SNAP_COMMON = join(homedir(), 'snap', 'chromium', 'common');
-const canRunChromium = existsSync(CHROMIUM) && existsSync(SNAP_COMMON);
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-interest-audit-'));
+const tmp = (): string => tmpDir('learn-interest-audit-');
 
 type Learner = { schema: 1; interest: Record<string, string>; mastery: object; history: unknown[] };
 const L = (interest: Record<string, string>): Learner => ({ schema: 1, interest, mastery: {}, history: [] });
@@ -36,41 +28,8 @@ afterAll(() => {
   }
 });
 
-/** Adds a second backend topic whose title differs from its slug, so title sourcing is observable. */
-function addTlsTopic(project: string): void {
-  const dir = join(project, 'learn', 'backend', 'tls-basics');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'index.yaml'), 'title: TLS basics\nsummary: Handshakes and certificates in one page.\n');
-  writeFileSync(
-    join(dir, '01-handshake.md'),
-    [
-      '---',
-      'id: backend/tls-basics/01-handshake',
-      'title: The TLS handshake',
-      'level: intro',
-      'requires: []',
-      'sources:',
-      '  - title: "RFC 8446 TLS 1.3"',
-      '    url: https://www.rfc-editor.org/rfc/rfc8446',
-      'updated: 2026-11-21',
-      '---',
-      '',
-      'A TLS handshake agrees on keys before any application data is sent.',
-      '',
-    ].join('\n'),
-  );
-}
-
-function copyLearn(project: string): void {
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-  addTlsTopic(project);
-}
-
 function fixture(learner?: Learner) {
-  const project = tmp();
-  const home = tmp();
-  copyLearn(project);
-  if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
+  const { project, home } = makeProject({ tls: true, learner });
   const app = makeApp({
     project,
     distDir: project,
@@ -176,15 +135,9 @@ describe('domain-level skip in lesson selection', () => {
   });
 });
 
-describe('browser: interest controls drive the real server', () => {
-  const servers: ChildProcess[] = [];
-  const browsers: Array<() => void> = [];
-  afterEach(() => {
-    for (const stop of browsers.splice(0)) stop();
-    for (const s of servers.splice(0)) s.kill();
-  });
+describe.skipIf(!canRunChromium)('browser: interest controls drive the real server', () => {
+  afterEach(closeAllPages);
 
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   async function waitUntil(check: () => boolean, label: string, ms = 20_000): Promise<void> {
     const end = Date.now() + ms;
     while (!check()) {
@@ -194,89 +147,12 @@ describe('browser: interest controls drive the real server', () => {
   }
 
   async function startServer(learner: Learner | null) {
-    const project = tmp();
-    const home = tmp();
-    copyLearn(project);
-    mkdirSync(join(project, '.sdd'));
-    writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify({ jobs: [] }));
-    if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
-    const port = await freePort();
-    const base = `http://127.0.0.1:${port}`;
-    const child = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_CLAUDE: FAKE, SDD_LEARN_PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    servers.push(child);
-    await new Promise<void>((res, rej) => {
-      child.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && res());
-      child.on('exit', (c) => rej(new Error(`server exited ${c}`)));
-      setTimeout(() => rej(new Error('server start timeout')), 10_000);
-    });
+    const { project, home } = makeProject({ tls: true, now: { jobs: [] }, learner });
+    const srv = await startLearnServer({ project, home });
     const learnerFile = join(home, 'learner.json');
     const readInterest = (): Record<string, string> =>
       existsSync(learnerFile) ? (JSON.parse(readFileSync(learnerFile, 'utf8')) as Learner).interest : {};
-    return { base, learnerFile, readInterest, getJson: async <T,>(path: string) => (await fetch(base + path)).json() as Promise<T> };
-  }
-
-  /** Launches snap chromium with the DevTools protocol on a free port and returns an evaluate helper for the first tab. */
-  async function launchPage(url: string) {
-    const port = await freePort();
-    const userData = mkdtempSync(join(SNAP_COMMON, 'learn-interest-audit-ud-'));
-    const proc = spawn(
-      CHROMIUM,
-      ['--headless', '--no-sandbox', '--disable-gpu', `--user-data-dir=${userData}`, `--remote-debugging-port=${port}`, '--remote-allow-origins=*', '--window-size=1200,900', 'about:blank'],
-      { stdio: 'ignore' },
-    );
-    const stop = () => {
-      proc.kill();
-      try {
-        rmSync(userData, { recursive: true, force: true });
-      } catch {
-        // snap chromium may still be flushing its profile; the next run uses a fresh dir
-      }
-    };
-    browsers.push(stop);
-    const end = Date.now() + 30_000;
-    while (true) {
-      try {
-        await fetch(`http://127.0.0.1:${port}/json/version`);
-        break;
-      } catch {
-        if (Date.now() > end) throw new Error('chromium DevTools endpoint never came up');
-        await sleep(200);
-      }
-    }
-    const target = (await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })).json()) as {
-      webSocketDebuggerUrl: string;
-    };
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise<void>((res, rej) => {
-      ws.onopen = () => res();
-      ws.onerror = () => rej(new Error('DevTools websocket failed'));
-    });
-    let seq = 0;
-    const pending = new Map<number, (m: { result?: { result?: { value?: unknown }; exceptionDetails?: { text: string } } }) => void>();
-    ws.onmessage = (ev) => {
-      const m = JSON.parse(String(ev.data)) as { id?: number };
-      if (m.id !== undefined) pending.get(m.id)?.(m as never);
-    };
-    const evaluate = async <T,>(expression: string): Promise<T> => {
-      const id = ++seq;
-      const reply = await new Promise<{ result?: { result?: { value?: unknown }; exceptionDetails?: { text: string } } }>((res) => {
-        pending.set(id, res);
-        ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-      });
-      if (reply.result?.exceptionDetails) throw new Error(`page eval failed: ${reply.result.exceptionDetails.text}`);
-      return reply.result?.result?.value as T;
-    };
-    const waitFor = async (expression: string, label: string, ms = 20_000): Promise<void> => {
-      const end = Date.now() + ms;
-      while (!(await evaluate<boolean>(`Boolean(${expression})`))) {
-        if (Date.now() > end) throw new Error(`timed out waiting for ${label} in the page`);
-        await sleep(150);
-      }
-    };
-    return { evaluate, waitFor, close: () => ws.close() };
+    return { base: srv.base, learnerFile, readInterest, getJson: async <T,>(path: string) => (await fetch(srv.base + path)).json() as Promise<T> };
   }
 
   it('onboarding: choosing deep on the backend domain writes the domain key only', async () => {
@@ -314,13 +190,3 @@ describe('browser: interest controls drive the real server', () => {
     expect(s.readInterest()).toEqual({ backend: domainValue, [key]: value });
   }, 120_000);
 });
-
-async function freePort(): Promise<number> {
-  return new Promise((res) => {
-    const s = createServer();
-    s.listen(0, '127.0.0.1', () => {
-      const p = (s.address() as { port: number }).port;
-      s.close(() => res(p));
-    });
-  });
-}

@@ -1,31 +1,19 @@
-// [origin ref=llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
 //   [intent]Verifies GET/PUT /api/interest round-trips through learner.json, rejects bad keys and values without writing, makes a skipped topic disappear from selection, lets topic settings override domain settings, and routes an empty interest map to onboarding in the built SPA.[/intent]
 //   [inv]A PUT that fails validation leaves learner.json byte-identical or absent; no test reaches the real claude binary.[/inv]
 // [/origin]
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
-
-const execFileAsync = promisify(execFile);
-const HERE = dirname(fileURLToPath(import.meta.url));
-const LEARN_APP = resolve(HERE, '..');
-const REPO = resolve(LEARN_APP, '..');
-const FAKE = join(HERE, 'fixtures', 'fake-claude.mjs');
-const CHROMIUM = '/snap/bin/chromium';
-const SNAP_COMMON = join(homedir(), 'snap', 'chromium', 'common');
-const canRunChromium = existsSync(CHROMIUM) && existsSync(SNAP_COMMON);
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-interest-'));
+import { canRunChromium, launchPage } from './helpers/browser.js';
+import { FAKE, LEARN_APP, copyLearn, makeProject, startLearnServer } from './helpers/server.js';
+import { tmp } from './helpers/tmp.js';
 
 let savedEnv: Record<string, string | undefined> = {};
 beforeAll(() => {
   savedEnv = { SDD_LEARN_HOME: process.env.SDD_LEARN_HOME, SDD_LEARN_CLAUDE: process.env.SDD_LEARN_CLAUDE };
-  process.env.SDD_LEARN_HOME = tmp();
+  process.env.SDD_LEARN_HOME = tmp('learn-interest-');
   process.env.SDD_LEARN_CLAUDE = FAKE;
 });
 afterAll(() => {
@@ -35,37 +23,8 @@ afterAll(() => {
   }
 });
 
-/** A second topic so that "next lesson" has somewhere to go after a skip. */
-function addTlsTopic(project: string): void {
-  const dir = join(project, 'learn', 'backend', 'tls-basics');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'index.yaml'), 'title: TLS basics\nsummary: Handshakes and certificates in one page.\n');
-  writeFileSync(
-    join(dir, '01-handshake.md'),
-    [
-      '---',
-      'id: backend/tls-basics/01-handshake',
-      'title: The TLS handshake',
-      'level: intro',
-      'requires: []',
-      'sources:',
-      '  - title: "RFC 8446 TLS 1.3"',
-      '    url: https://www.rfc-editor.org/rfc/rfc8446',
-      'updated: 2026-11-21',
-      '---',
-      '',
-      'A TLS handshake agrees on keys before any application data is sent.',
-      '',
-    ].join('\n'),
-  );
-}
-
 function fixture(learner?: object) {
-  const project = tmp();
-  const home = tmp();
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-  addTlsTopic(project);
-  if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
+  const { project, home } = makeProject({ tls: true, learner });
   const app = makeApp({
     project,
     distDir: project,
@@ -158,14 +117,6 @@ describe('PUT /api/interest validation writes nothing', () => {
     expect(existsSync(f.learnerFile)).toBe(false);
   });
 
-  it('a map with one good and one bad entry writes neither', async () => {
-    const f = fixture(L({ backend: 'basics' }));
-    const before = readFileSync(f.learnerFile, 'utf8');
-    const res = await f.put({ backend: 'deep', 'backend/http-caching': 'never' });
-    expect(res.status).toBe(400);
-    expect(readFileSync(f.learnerFile, 'utf8')).toBe(before);
-  });
-
   it('a body that is not an object is a 400 bad_body', async () => {
     const f = fixture();
     expect((await f.put(undefined, 'not json')).status).toBe(400);
@@ -204,12 +155,6 @@ describe('"Not for me" flow at API level', () => {
 });
 
 describe('topic setting overrides domain setting', () => {
-  it('domain skip with topic deep selects that topic (selection level)', async () => {
-    const f = fixture(L({ backend: 'skip', 'backend/http-caching': 'deep' }));
-    const body = (await (await f.app.request('/api/next')).json()) as { lesson: { id: string } | null };
-    expect(body.lesson?.id).toBe('backend/http-caching/01-freshness');
-  });
-
   it('domain deep with topic basics shows the topic as basics and its working lesson as not_at_basics', async () => {
     const f = fixture(L({ backend: 'deep', 'backend/http-caching': 'basics' }));
     const tree = (await (await f.app.request('/api/tree')).json()) as {
@@ -252,51 +197,17 @@ describe('SPA bundle routes an empty interest map to onboarding', () => {
 });
 
 describe.skipIf(!canRunChromium)('headless Chromium onboarding render of the real server', () => {
-  let child: ChildProcess | undefined;
-  let base = '';
-  let userData = '';
-
-  const startServer = async (learner: object | null): Promise<void> => {
-    child?.kill();
-    const project = tmp();
-    const home = tmp();
-    cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-    mkdirSync(join(project, '.sdd'));
-    writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify({ jobs: [] }));
-    if (learner) writeFileSync(join(home, 'learner.json'), JSON.stringify(learner));
-    const port = await freePort();
-    base = `http://127.0.0.1:${port}`;
-    child = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_CLAUDE: FAKE, SDD_LEARN_PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    await new Promise<void>((res, rej) => {
-      child!.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && res());
-      child!.on('exit', (c) => rej(new Error(`server exited ${c}`)));
-      setTimeout(() => rej(new Error('server start timeout')), 10_000);
-    });
+  /** Serves a fresh project and returns the page's outerHTML once the SPA has rendered either screen. */
+  const render = async (learner: object | null): Promise<string> => {
+    const { project, home } = makeProject({ now: { jobs: [] }, learner });
+    const srv = await startLearnServer({ project, home });
+    const page = await launchPage(`${srv.base}/`);
+    await page.waitFor(`document.querySelector('.onb') || document.querySelector('.quiz')`, 'onboarding or lesson view');
+    return page.evaluate<string>('document.documentElement.outerHTML');
   };
-
-  const dumpDom = async (): Promise<string> => {
-    const { stdout } = await execFileAsync(
-      CHROMIUM,
-      ['--headless', '--no-sandbox', '--disable-gpu', `--user-data-dir=${userData}`, '--virtual-time-budget=5000', '--dump-dom', `${base}/`],
-      { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 },
-    );
-    return stdout;
-  };
-
-  beforeAll(() => {
-    userData = mkdtempSync(join(SNAP_COMMON, 'learn-interest-ud-'));
-  });
-  afterAll(() => {
-    child?.kill();
-    if (userData) rmSync(userData, { recursive: true, force: true });
-  });
 
   it('an empty learner.json lands on the onboarding screen listing the domains', async () => {
-    await startServer(null);
-    const dom = await dumpDom();
+    const dom = await render(null);
     expect(dom).toContain('What do you want to get better at?');
     expect(dom).toContain('Backend');
     expect(dom).toContain('Save and show my next lesson');
@@ -304,19 +215,8 @@ describe.skipIf(!canRunChromium)('headless Chromium onboarding render of the rea
   }, 90_000);
 
   it('a learner with interests lands on the lesson view, not onboarding', async () => {
-    await startServer(L({ backend: 'deep' }));
-    const dom = await dumpDom();
+    const dom = await render(L({ backend: 'deep' }));
     expect(dom).toContain('Check yourself');
     expect(dom).not.toContain('What do you want to get better at?');
   }, 90_000);
 });
-
-async function freePort(): Promise<number> {
-  return new Promise((res) => {
-    const s = createServer();
-    s.listen(0, '127.0.0.1', () => {
-      const p = (s.address() as { port: number }).port;
-      s.close(() => res(p));
-    });
-  });
-}

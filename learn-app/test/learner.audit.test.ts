@@ -1,62 +1,29 @@
-// [origin ref=llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Audits learner.json locking and server start: stale locks are broken, fresh locks are respected, unknown schemas exit non-zero naming the version, and the project directory is never written.[/intent]
 // [/origin]
-import { spawnSync, type ChildProcess, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LEARN_APP, makeProject, sleep, startLearnServer } from './helpers/server.js';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { initLearner, readLearner, updateLearner } from '../src/state/learner.js';
 
-const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const REPO = resolve(LEARN_APP, '..');
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-audit-'));
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const tmp = (): string => tmpDir('learn-audit-');
 
-function listTree(root: string): string[] {
-  const out: string[] = [];
+/** Maps every file under root to the sha256 of its contents, so "unchanged" means contents, not just names. */
+function snapshot(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name);
       if (statSync(full).isDirectory()) walk(full);
-      else out.push(relative(root, full));
+      else out[relative(root, full)] = createHash('sha256').update(readFileSync(full)).digest('hex');
     }
   };
   walk(root);
-  return out.sort();
-}
-
-async function freePort(): Promise<number> {
-  return new Promise((res) => {
-    const s = createServer();
-    s.listen(0, '127.0.0.1', () => {
-      const p = (s.address() as { port: number }).port;
-      s.close(() => res(p));
-    });
-  });
-}
-
-async function startServer(project: string, home: string): Promise<{ base: string; stop: () => Promise<void> }> {
-  const port = await freePort();
-  const child: ChildProcess = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-    env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_PORT: String(port) },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await new Promise<void>((res, rej) => {
-    child.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && res());
-    child.on('exit', (c) => rej(new Error(`server exited ${c} before listening`)));
-    setTimeout(() => rej(new Error('server start timeout')), 10_000);
-  });
-  return {
-    base: `http://127.0.0.1:${port}`,
-    stop: () =>
-      new Promise((res) => {
-        child.once('exit', () => res());
-        child.kill();
-      }),
-  };
+  return out;
 }
 
 describe('learner.json lock staleness', () => {
@@ -95,7 +62,7 @@ describe('learner.json lock staleness', () => {
 });
 
 describe('server start on learner.json', () => {
-  it('exits non-zero and names the found schema version on stderr', () => {
+  it('exits 1, names the found schema version on stderr and leaves the file untouched', () => {
     const home = tmp();
     writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 9 }));
     const project = tmp();
@@ -110,29 +77,23 @@ describe('server start on learner.json', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('unsupported learner schema 9');
     expect(r.stdout).not.toContain('listening');
+    expect(JSON.parse(readFileSync(join(home, 'learner.json'), 'utf8'))).toEqual({ schema: 9 });
   });
 });
 
 describe('server writes only under SDD_LEARN_HOME', () => {
-  it('leaves the project directory byte-for-byte unchanged across API requests', async () => {
-    const project = tmp();
-    cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-    mkdirSync(join(project, '.sdd'));
-    writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify({ jobs: [] }));
-    const home = tmp();
-    const before = listTree(project);
+  it('leaves every file of the project directory unchanged (same names, same content hashes) across API requests', async () => {
+    const { project, home } = makeProject({ now: { jobs: [] } });
+    const before = snapshot(project);
 
-    const srv = await startServer(project, home);
-    try {
-      for (const p of ['/api/next', '/api/learner', '/api/tree', '/api/now']) {
-        expect((await fetch(`${srv.base}${p}`)).status).toBe(200);
-      }
-    } finally {
-      await srv.stop();
+    const srv = await startLearnServer({ project, home, claude: null });
+    for (const p of ['/api/next', '/api/learner', '/api/tree', '/api/now']) {
+      expect((await fetch(`${srv.base}${p}`)).status).toBe(200);
     }
+    await srv.stop();
 
-    expect(before).toContain('.sdd/now.json');
-    expect(listTree(project)).toEqual(before);
+    expect(Object.keys(before)).toContain('.sdd/now.json');
+    expect(snapshot(project)).toEqual(before);
     expect(JSON.parse(readFileSync(join(home, 'learner.json'), 'utf8'))).toEqual({ schema: 1, interest: {}, mastery: {}, history: [] });
   }, 20_000);
 });

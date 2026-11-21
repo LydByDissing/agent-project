@@ -1,28 +1,20 @@
-// [origin ref=llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-008 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006,REQ-OPERATOR-EDU-008 c4=learn_app/learn_server]
 //   [intent]Checks that in-memory quizzes older than one hour are evicted on the next /api/quiz call (clock injected through AppOptions), and that an is_error claude envelope reports the CLI error text rather than a fake exit code.[/intent]
 //   [inv]Quizzes are evicted only on /api/quiz calls; an envelope with is_error never produces an "exit 0" message.[/inv]
 // [/origin]
-import { chmodSync, cpSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ClaudeExitError, parseQuiz, claudeOpts } from '../src/quiz/quiz.js';
-import { makeApp } from './helpers/app.js';
+import { FAKE, withEnv } from './helpers/server.js';
+import { LESSON, quizServer, stubBinary } from './helpers/quiz.js';
+import { tmp } from './helpers/tmp.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const LEARN_APP = resolve(HERE, '..');
-const REPO = resolve(LEARN_APP, '..');
-const FAKE = join(HERE, 'fixtures', 'fake-claude.mjs');
-const LESSON = 'backend/http-caching/01-freshness';
 const HOUR = 60 * 60 * 1000;
 const KEYS = ['s1'];
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-quiz-expiry-'));
 
 let savedEnv: Record<string, string | undefined> = {};
 beforeAll(() => {
   savedEnv = { SDD_LEARN_HOME: process.env.SDD_LEARN_HOME, SDD_LEARN_CLAUDE: process.env.SDD_LEARN_CLAUDE };
-  process.env.SDD_LEARN_HOME = tmp();
+  process.env.SDD_LEARN_HOME = tmp('learn-quiz-expiry-');
   process.env.SDD_LEARN_CLAUDE = FAKE;
   delete process.env.FAKE_CLAUDE_MODE;
 });
@@ -33,30 +25,9 @@ afterAll(() => {
   }
 });
 
-function stubBinary(stdout: string): string {
-  const dir = tmp();
-  const bin = join(dir, 'claude-stub.mjs');
-  writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.resume();\nprocess.stdin.on('end', () => process.stdout.write(${JSON.stringify(stdout)}));\n`);
-  chmodSync(bin, 0o755);
-  return bin;
-}
-
 function server(bin: string = FAKE) {
-  const project = tmp();
-  const home = tmp();
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-  writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [] }));
   let clock = Date.parse('2026-11-21T10:00:00Z');
-  const app = makeApp({
-    project,
-    distDir: project,
-    home,
-    today: () => '2026-11-21',
-    now: () => clock,
-    claude: () => ({ ...claudeOpts(), bin, timeoutMs: 10_000 }),
-  });
-  const post = (p: string, body?: unknown) =>
-    app.request(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const { post } = quizServer({}, { now: () => clock, claude: () => ({ ...claudeOpts(), bin, timeoutMs: 10_000 }) });
   return {
     post,
     advance: (ms: number) => (clock += ms),
@@ -135,17 +106,3 @@ describe('claude envelope with is_error', () => {
     expect(body).not.toHaveProperty('questions');
   });
 });
-
-async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
-  const saved: Record<string, string | undefined> = {};
-  for (const k of Object.keys(env)) saved[k] = process.env[k];
-  Object.assign(process.env, env);
-  try {
-    return await fn();
-  } finally {
-    for (const k of Object.keys(env)) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
-    }
-  }
-}

@@ -1,8 +1,8 @@
-// [origin ref=llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
 //   [intent]Proves the Host/Origin/Content-Type guard: foreign pages cannot read or drive the server, and a rejected write never reaches claude or the learner file.[/intent]
 // [/origin]
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 const FAKE = join(HERE, 'fixtures', 'fake-claude.mjs');
 const PORT = 5151;
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-guard-'));
+const tmp = (): string => tmpDir('learn-guard-');
 
 function fixture() {
   const project = tmp();

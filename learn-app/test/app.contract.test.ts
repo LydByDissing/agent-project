@@ -1,19 +1,19 @@
-// [origin ref=llm-dsl-gu1y.2 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.2 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
 //   [intent]Pins the Hono app contract for stub routes, unknown API paths and path-resolution edge cases that the coder's smoke tests do not cover.[/intent]
 // [/origin]
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
+import { tmp } from './helpers/tmp.js';
 import { PathEscapeError, resolveUnder } from '../src/server/paths.js';
 
 let app: ReturnType<typeof makeApp>;
 
 beforeAll(() => {
-  const dist = mkdtempSync(join(tmpdir(), 'learn-contract-dist-'));
+  const dist = tmp('learn-contract-dist-');
   writeFileSync(join(dist, 'index.html'), '<title>SDD Learn</title>');
-  app = makeApp({ project: dist, distDir: dist, home: mkdtempSync(join(tmpdir(), 'learn-contract-home-')) });
+  app = makeApp({ project: dist, distDir: dist, home: tmp('learn-contract-home-') });
 });
 
 describe('API contract', () => {
@@ -57,6 +57,10 @@ describe('SPA serving', () => {
 
 describe('resolveUnder edge cases', () => {
   const root = resolve('/srv/project/learn');
+
+  it('a null byte in the request is rejected as an escape', () => {
+    expect(() => resolveUnder(root, 'c\0')).toThrow(PathEscapeError);
+  });
 
   it('empty request resolves to the root itself', () => {
     expect(resolveUnder(root, '')).toBe(root);

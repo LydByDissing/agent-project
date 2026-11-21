@@ -1,27 +1,16 @@
-// [origin ref=llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/lesson_selector]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.6 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/lesson_selector]
 //   [intent]Audits the selector against the t3 acceptance criterion on the real seed library, plus interest precedence, skipped-topic notes and the documented rank order.[/intent]
 // [/origin]
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { type Lesson, type Library, loadLibrary } from '../src/library/load.js';
+import { loadLibrary } from '../src/library/load.js';
 import { type Now, select } from '../src/selector/select.js';
-import { emptyLearner, type Learner } from '../src/state/learner.js';
+import { emptyLearner } from '../src/state/learner.js';
+import { TODAY, job, learner, lesson, lib } from './helpers/builders.js';
 
-const TODAY = '2026-11-21';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SEED = loadLibrary(REPO);
-
-function lesson(domain: string, topic: string, order: number, level: Lesson['level'], requires: string[] = []): Lesson {
-  const nn = String(order).padStart(2, '0');
-  return {
-    id: `${domain}/${topic}/${nn}-x`, domain, topic, order, file: '', title: `T ${domain} ${topic} ${nn}`, level, requires,
-    sources: [{ title: 's', url: 'https://e.x' }], updated: TODAY, stale: false, body: '', diagrams: [],
-  };
-}
-const lib = (lessons: Lesson[]): Library => ({ domains: [], lessons, edges: [] });
-const learner = (p: Partial<Learner>): Learner => ({ ...emptyLearner(), ...p });
-const job = (id: string, title: string, topics: string[], status = 'running') => ({ id, title, topics, status });
 
 describe('select against the seed library (acceptance example)', () => {
   const NOW: Now = {

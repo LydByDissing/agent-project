@@ -1,17 +1,17 @@
-// [origin ref=llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005 c4=learn_app/learn_server]
-//   [intent]Verifies learner.json creation, schema refusal at server start, and that two concurrent processes lose no update.[/intent]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005 c4=learn_app/learn_server]
+//   [intent]Verifies learner.json creation, unknown-schema refusal in the state layer, and that concurrent writers in one process and in two processes lose no update.[/intent]
 // [/origin]
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { UnsupportedSchemaError, emptyLearner, initLearner, learnHome, readLearner, updateLearner } from '../src/state/learner.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-state-'));
+const tmp = (): string => tmpDir('learn-state-');
 
 describe('learner state', () => {
   it('creates learner.json with schema 1 and empty sections when missing', async () => {
@@ -88,27 +88,4 @@ for (let i = 0; i < Number(n); i++) {
     expect(keys).toHaveLength(80);
     expect(readdirSync(home)).toEqual(['learner.json']);
   }, 30_000);
-});
-
-describe('server start with learner.json', () => {
-  const project = (): string => {
-    const p = tmp();
-    mkdirSync(join(p, 'learn'));
-    return p;
-  };
-
-  it('refuses to start on an unknown schema, naming the version, exit non-zero', () => {
-    const home = tmp();
-    writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 9 }));
-    const r = spawnSync(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project()], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_PORT: '0' },
-      encoding: 'utf8',
-      timeout: 10_000,
-    });
-    expect(r.status).not.toBe(0);
-    expect(r.status).not.toBeNull();
-    expect(r.stderr).toContain('9');
-    expect(existsSync(join(home, 'learner.json'))).toBe(true);
-    expect(JSON.parse(readFileSync(join(home, 'learner.json'), 'utf8'))).toEqual({ schema: 9 });
-  });
 });

@@ -1,63 +1,17 @@
-// [origin ref=llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Verifies the lesson library loader and `learn validate` against fixture trees and the real seed learn/ directory.[/intent]
 //   [inv]Every validation rule has a failing fixture and a passing positive control.[/inv]
 // [/origin]
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { runCli } from '../src/library/cli.js';
 import { LibraryError, loadLibrary } from '../src/library/load.js';
+import { IAC, INDEX, lessonMd, makeLibProject, setMtime } from './helpers/library.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-function makeProject(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), 'learn-lib-'));
-  for (const [rel, text] of Object.entries(files)) {
-    const abs = join(root, rel);
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, text);
-  }
-  return root;
-}
-
-function setMtime(root: string, rel: string, when: Date): void {
-  utimesSync(join(root, rel), when, when);
-}
-
-const INDEX = (title: string) => `title: ${title}\nsummary: Summary of ${title}.\n`;
-
-function lesson(id: string, opts: { level?: string; requires?: string[]; sources?: string; body?: string; updated?: string } = {}): string {
-  const requires = opts.requires ?? [];
-  const reqText = requires.length === 0 ? '[]' : '\n' + requires.map((r) => `  - ${r}`).join('\n');
-  const sources =
-    opts.sources ??
-    '  - title: Spec\n    url: https://www.rfc-editor.org/rfc/rfc9110#name-etag';
-  return [
-    '---',
-    `id: ${id}`,
-    `title: Lesson ${id}`,
-    `level: ${opts.level ?? 'intro'}`,
-    `requires: ${reqText}`,
-    'sources:',
-    sources,
-    `updated: ${opts.updated ?? '2026-11-21'}`,
-    '---',
-    opts.body ?? 'Body text for the lesson.',
-    '',
-  ].join('\n');
-}
-
-const IAC = {
-  'learn/iac/index.yaml': INDEX('Infrastructure as code'),
-  'learn/iac/terraform-state/index.yaml': INDEX('Terraform state'),
-  'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { level: 'intro' }),
-  'learn/iac/terraform-state/02-remote-backends.md': lesson('iac/terraform-state/02-remote-backends', {
-    level: 'working',
-    requires: ['iac/terraform-state/01-what-state-is'],
-  }),
-};
+const makeProject = makeLibProject;
+const lesson = lessonMd;
 
 function expectIssue(fn: () => unknown, ...parts: string[]): string[] {
   let err: unknown;
@@ -350,40 +304,6 @@ describe('loadLibrary: structure and front matter', () => {
   });
 });
 
-describe('runCli: learn validate', () => {
-  it('exits 0 with a one-line summary on a valid tree', () => {
-    const res = runCli(['validate', '--project', makeProject(IAC)]);
-    expect(res.code).toBe(0);
-    expect(res.stderr).toEqual([]);
-    expect(res.stdout).toEqual(['learn OK: 1 domains, 1 topics, 2 lessons, 1 prerequisite edges']);
-  });
-
-  it('exits 1 and lists every problem, each naming its file', () => {
-    const res = runCli([
-      'validate',
-      '--project',
-      makeProject({
-        ...IAC,
-        'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { sources: '  []' }),
-        'learn/iac/terraform-state/02-remote-backends.md': lesson('iac/terraform-state/02-remote-backends', {
-          level: 'working',
-          requires: ['iac/terraform-state/09-missing'],
-        }),
-      }),
-    ]);
-    expect(res.code).toBe(1);
-    expect(res.stdout).toEqual([]);
-    expect(res.stderr[0]).toBe('learn validate: 2 problem(s)');
-    expect(res.stderr.join('\n')).toContain('learn/iac/terraform-state/01-what-state-is.md: sources is empty');
-    expect(res.stderr.join('\n')).toContain('learn/iac/terraform-state/02-remote-backends.md: requires "iac/terraform-state/09-missing"');
-  });
-
-  it('exits 2 with usage when the arguments are wrong', () => {
-    expect(runCli(['validate']).code).toBe(2);
-    expect(runCli(['render']).code).toBe(2);
-  });
-});
-
 describe('seed learn/ in this repo', () => {
   it('passes validation', () => {
     const lib = loadLibrary(REPO);
@@ -395,6 +315,5 @@ describe('seed learn/ in this repo', () => {
     ]);
     expect(lib.lessons[1].diagrams).toEqual(['revalidation']);
     expect(lib.edges).toEqual([{ from: 'backend/http-caching/02-revalidation', to: 'backend/http-caching/01-freshness' }]);
-    expect(runCli(['validate', '--project', REPO]).code).toBe(0);
   });
 });

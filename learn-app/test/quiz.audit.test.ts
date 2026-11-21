@@ -1,30 +1,20 @@
-// [origin ref=llm-dsl-gu1y.8 req=REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009 c4=learn_app/question_generator]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.8 req=REQ-OPERATOR-EDU-008,REQ-OPERATOR-EDU-009 c4=learn_app/question_generator]
 //   [intent]Audits the t4 quiz acceptance criterion: the payload never leaks answers, grading is server-side, Leitner boxes follow the 0/1/2/4/8/16 table across year rollover, the prompt is lesson-scoped, validation rejects malformed quizzes, and the bundle wires the quiz with Retry.[/intent]
 // [/origin]
-import { spawn, type ChildProcess } from 'node:child_process';
-import { buildSync } from 'esbuild';
-import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  ClaudeExitError, ClaudeMissingError, QuizSchemaError, UnknownSourceError,
+  ClaudeMissingError, QuizSchemaError, UnknownSourceError,
   buildPrompt, claudeOpts, generateQuiz, parseQuiz,
 } from '../src/quiz/quiz.js';
-import { makeApp } from './helpers/app.js';
 import { INTERVAL_DAYS, leitner } from '../src/state/leitner.js';
-import { readLearner, updateLearner } from '../src/state/learner.js';
+import { FAKE, LEARN_APP, copyLearn, startLearnServer, withEnv } from './helpers/server.js';
+import { LESSON, OTHER, quizServer, type QuizServer as Server } from './helpers/quiz.js';
+import { tmp } from './helpers/tmp.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const LEARN_APP = resolve(HERE, '..');
-const REPO = resolve(LEARN_APP, '..');
-const FAKE = join(HERE, 'fixtures', 'fake-claude.mjs');
-const LESSON = 'backend/http-caching/01-freshness';
-const OTHER = 'backend/http-caching/02-revalidation';
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-quiz-audit-'));
+const server = (learner: Record<string, unknown> = {}, today?: string): Server => quizServer(learner, { today });
 
 // Every test runs with a private SDD_LEARN_HOME and the fake CLI; the real `claude` must never be spawned.
 let savedEnv: Record<string, string | undefined> = {};
@@ -44,41 +34,7 @@ afterAll(() => {
   }
 });
 
-async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
-  const saved: Record<string, string | undefined> = {};
-  for (const k of Object.keys(env)) saved[k] = process.env[k];
-  Object.assign(process.env, env);
-  try {
-    return await fn();
-  } finally {
-    for (const k of Object.keys(env)) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
-    }
-  }
-}
-
-/** A learner app over a preserved-timestamp copy of learn/, with today injected. */
-function server(learner: Record<string, unknown> = {}, today = '2026-11-21') {
-  const project = tmp();
-  const home = tmp();
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-  writeFileSync(
-    join(home, 'learner.json'),
-    JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [], ...learner }),
-  );
-  const app = makeApp({ project, distDir: project, home, today: () => today });
-  const post = (p: string, body?: unknown) =>
-    app.request(p, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  const state = () => readLearner(home);
-  return { app, post, state, home };
-}
-type Server = ReturnType<typeof server>;
-
+/** Starts a quiz for a lesson with the fake claude in valid mode unless `env` overrides it. */
 async function startQuiz(s: Server, env: Record<string, string> = {}, lesson = LESSON) {
   const res = await withEnv({ FAKE_CLAUDE_MODE: 'valid', ...env }, () => s.post(`/api/quiz/${lesson}`));
   const body = (await res.json()) as any;
@@ -113,18 +69,6 @@ const envelope = (payload: unknown): string => JSON.stringify({ type: 'result', 
 const option = (n: number) => ({ text: `t${n}`, explanation: `e${n}` });
 const question = (over: object = {}) => ({ q: 'What?', options: [option(0), option(1), option(2)], correct: 0, source: 's1', ...over });
 const KEYS = ['s1', 's2'];
-
-/** Writes an executable stub that ignores stdin and prints `stdout`, to drive error envelopes through the server. */
-function stubBinary(stdout: string): string {
-  const dir = tmp();
-  const bin = join(dir, 'claude-stub.mjs');
-  writeFileSync(
-    bin,
-    `#!${process.execPath}\nprocess.stdin.resume();\nprocess.stdin.on('end', () => process.stdout.write(${JSON.stringify(stdout)}));\n`,
-  );
-  chmodSync(bin, 0o755);
-  return bin;
-}
 
 describe('quiz payload sent to the client', () => {
   it('contains no correct, correctIndex, explanation, explanations, source or sources key at any depth', async () => {
@@ -348,18 +292,6 @@ describe('quiz validation (parseQuiz)', () => {
     const out = parseQuiz(JSON.stringify({ type: 'result', is_error: false, result: text }), KEYS);
     expect(out).toHaveLength(3);
   });
-  it('a claude envelope with is_error true yields a named ClaudeExitError carrying its message', () => {
-    const stdout = JSON.stringify({ type: 'result', is_error: true, result: 'Credit balance too low' });
-    let err: unknown;
-    try {
-      parseQuiz(stdout, KEYS);
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(ClaudeExitError);
-    expect((err as Error).name).toBe('ClaudeExitError');
-    expect((err as Error).message).toContain('Credit balance too low');
-  });
   it('an envelope whose result is not a string is a QuizSchemaError', () => {
     expect(() => parseQuiz(JSON.stringify({ is_error: false, result: { questions: [] } }), KEYS)).toThrow(QuizSchemaError);
   });
@@ -399,16 +331,6 @@ describe('error responses never carry placeholder questions', () => {
     expect(body.error.name).toBe(name);
     expect(body).not.toHaveProperty('questions');
   });
-  it('an is_error envelope from claude responds 502 ClaudeExitError without a questions key', async () => {
-    const bin = stubBinary(JSON.stringify({ type: 'result', is_error: true, result: 'Not logged in' }));
-    const s = server();
-    const res = await withEnv({ SDD_LEARN_CLAUDE: bin }, () => s.post(`/api/quiz/${LESSON}`));
-    const body = (await res.json()) as any;
-    expect(res.status).toBe(502);
-    expect(body.error.name).toBe('ClaudeExitError');
-    expect(body.error.message).toContain('Not logged in');
-    expect(body).not.toHaveProperty('questions');
-  });
 });
 
 describe('learner state under concurrency and stale locks', () => {
@@ -432,46 +354,6 @@ describe('learner state under concurrency and stale locks', () => {
     const results = await Promise.all(calls);
     expect(results.map((r) => r.res.status)).toEqual(Array(6).fill(200));
     expect(s.state().history).toHaveLength(6);
-  });
-  it('three separate processes appending to learner.json concurrently lose no history entry', async () => {
-    const dir = tmp();
-    const home = tmp();
-    const entry = join(dir, 'writer.ts');
-    const bundled = join(dir, 'writer.mjs');
-    writeFileSync(
-      entry,
-      `import { updateLearner } from ${JSON.stringify(join(LEARN_APP, 'src', 'state', 'learner.ts'))};
-const [home, tag, n] = process.argv.slice(2);
-for (let i = 0; i < Number(n); i++) {
-  await updateLearner(home, (cur) => { cur.history.push({ lesson: tag, q: tag + '-' + i, chosen: 0, correct: 0, at: '2026-11-21T00:00:00Z' }); });
-}
-`,
-    );
-    buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'esm', outfile: bundled, logLevel: 'silent' });
-    const procs = ['a', 'b', 'c'].map(
-      (tag) =>
-        new Promise<number | null>((res) => {
-          const p = spawn(process.execPath, [bundled, home, tag, '25'], { stdio: 'ignore' });
-          p.on('exit', (code) => res(code));
-        }),
-    );
-    expect(await Promise.all(procs)).toEqual([0, 0, 0]);
-    const qs = readLearner(home).history.map((h) => h.q);
-    expect(qs, 'a concurrent writer lost history entries').toHaveLength(75);
-    expect(new Set(qs).size).toBe(75);
-  }, 60_000);
-  it('20 concurrent updateLearner appends in one process are all persisted', async () => {
-    const home = tmp();
-    await Promise.all(
-      Array.from({ length: 20 }, (_, i) =>
-        updateLearner(home, (cur) => {
-          cur.history.push({ lesson: 'x', q: `q${i}`, chosen: 0, correct: 0, at: '2026-11-21T00:00:00Z' });
-        }),
-      ),
-    );
-    const qs = readLearner(home).history.map((h) => h.q).sort();
-    expect(qs).toHaveLength(20);
-    expect(new Set(qs).size).toBe(20);
   });
 });
 
@@ -504,40 +386,14 @@ describe('SPA bundle quiz wiring', () => {
 });
 
 describe('bundled server.js with the fake CLI', () => {
-  let child: ChildProcess | undefined;
-  let base = '';
-  let logFile = '';
-
-  beforeAll(async () => {
-    const project = tmp();
-    const home = tmp();
-    cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true, preserveTimestamps: true });
-    writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [] }));
-    logFile = join(tmp(), 'argv.log');
-    const port = await new Promise<number>((res) => {
-      const s = createServer();
-      s.listen(0, '127.0.0.1', () => {
-        const p = (s.address() as { port: number }).port;
-        s.close(() => res(p));
-      });
-    });
-    base = `http://127.0.0.1:${port}`;
-    child = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_CLAUDE: FAKE, FAKE_CLAUDE_LOG: logFile, SDD_LEARN_PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    await new Promise<void>((res, rej) => {
-      child!.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && res());
-      child!.on('exit', (c) => rej(new Error(`server exited ${c}`)));
-      setTimeout(() => rej(new Error('server start timeout')), 10_000);
-    });
-  });
-  afterAll(() => {
-    child?.kill();
-  });
-
   it('POST /api/quiz through the bundled server runs the fake CLI and returns 3 questions', async () => {
-    const res = await fetch(`${base}/api/quiz/${LESSON}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const project = tmp('learn-quiz-bundled-proj-');
+    const home = tmp('learn-quiz-bundled-home-');
+    copyLearn(project);
+    writeFileSync(join(home, 'learner.json'), JSON.stringify({ schema: 1, interest: { backend: 'deep' }, mastery: {}, history: [] }));
+    const logFile = join(tmp('learn-quiz-bundled-log-'), 'argv.log');
+    const srv = await startLearnServer({ project, home, env: { FAKE_CLAUDE_LOG: logFile } });
+    const res = await fetch(`${srv.base}/api/quiz/${LESSON}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const body = (await res.json()) as any;
     expect(res.status).toBe(200);
     expect(body.questions).toHaveLength(3);

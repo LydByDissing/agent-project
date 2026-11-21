@@ -1,8 +1,8 @@
-// [origin ref=llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.16 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
 //   [intent]Proves PUT /api/interest value inherit deletes a topic's own setting, is rejected on domain keys, and is atomic with the rest of a batch.[/intent]
 // [/origin]
-import { cpSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmp as tmpDir } from './helpers/tmp.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { loadLibrary } from '../src/library/load.js';
 import { makeApp } from './helpers/app.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-inherit-'));
+const tmp = (): string => tmpDir('learn-inherit-');
 
 function fixture(interest: Record<string, string>) {
   const project = tmp();

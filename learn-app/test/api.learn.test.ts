@@ -1,18 +1,14 @@
-// [origin ref=llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Exercises /api/now, learner, tree, next, lesson and asset against the seed lessons, and the real bundled server creating learner.json.[/intent]
 // [/origin]
-import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
+import { REPO, makeProject, startLearnServer } from './helpers/server.js';
+import { tmp as tmpDir } from './helpers/tmp.js';
 
-const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const REPO = resolve(LEARN_APP, '..');
-const tmp = (): string => mkdtempSync(join(tmpdir(), 'learn-api-'));
+const tmp = (): string => tmpDir('learn-api-');
 
 function fixture(learner?: object, now?: object) {
   const project = tmp();
@@ -147,35 +143,14 @@ describe('GET /api/lesson/* and /api/asset/*', () => {
 });
 
 describe('bundled server.js start', () => {
-  let child: ChildProcess | undefined;
-  afterAll(() => child?.kill());
-
   it('creates learner.json on start and serves /api/next and /api/lesson', async () => {
-    const project = tmp();
+    const { project } = makeProject({ now: NOW });
     const home = join(tmp(), 'home');
-    cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true });
-    mkdirSync(join(project, '.sdd'));
-    writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify(NOW));
-    const port = await new Promise<number>((res) => {
-      const s = createServer();
-      s.listen(0, '127.0.0.1', () => {
-        const p = (s.address() as { port: number }).port;
-        s.close(() => res(p));
-      });
-    });
-    child = spawn(process.execPath, [join(LEARN_APP, 'server.js'), '--project', project], {
-      env: { ...process.env, SDD_LEARN_HOME: home, SDD_LEARN_PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    await new Promise<void>((res, rej) => {
-      child!.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && res());
-      child!.on('exit', (c) => rej(new Error(`exited ${c}`)));
-      setTimeout(() => rej(new Error('start timeout')), 10_000);
-    });
+    const srv = await startLearnServer({ project, home, claude: null });
     expect(JSON.parse(readFileSync(join(home, 'learner.json'), 'utf8'))).toEqual({ schema: 1, interest: {}, mastery: {}, history: [] });
-    const next = await (await fetch(`http://127.0.0.1:${port}/api/next`)).json();
+    const next = await (await fetch(`${srv.base}/api/next`)).json();
     expect(next.lesson.id).toBe('backend/http-caching/01-freshness');
-    const lesson = await fetch(`http://127.0.0.1:${port}/api/lesson/${next.lesson.id}`);
+    const lesson = await fetch(`${srv.base}/api/lesson/${next.lesson.id}`);
     expect(lesson.status).toBe(200);
     expect(existsSync(join(project, 'learner.json'))).toBe(false);
   }, 20_000);

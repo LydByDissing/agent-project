@@ -1,70 +1,24 @@
-// [origin ref=llm-dsl-gu1y.2 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
-//   [intent]Runs the real bundled learn-app/server.js as a child process to verify loopback binding, SPA shell, health, traversal rejection and no-node_modules startup.[/intent]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.2 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
+//   [intent]Runs the real bundled learn-app/server.js as a child process to verify loopback binding (bind address and refused LAN connect), default port 4747, SPA shell, health, traversal rejection and no-node_modules startup.[/intent]
 // [/origin]
-import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { request as httpRequest, createServer } from 'node:http';
-import { networkInterfaces, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+import { networkInterfaces } from 'node:os';
+import { join } from 'node:path';
 import { connect } from 'node:net';
-import { fileURLToPath } from 'node:url';
 import { isBuiltin } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { LEARN_APP, freePort, makeProject, startLearnServer, type RunningServer } from './helpers/server.js';
+import { tmp } from './helpers/tmp.js';
 
-const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUNDLE = join(LEARN_APP, 'server.js');
 const POC = join(LEARN_APP, 'design', 'poc.html');
 const SERVER_START_TIMEOUT_MS = 10_000;
 
-interface Running {
-  child: ChildProcess;
-  port: number;
-  stderr: () => string;
-}
+type Running = RunningServer;
 
-function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer();
-    probe.unref();
-    probe.on('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      if (typeof address === 'object' && address) {
-        const port = address.port;
-        probe.close(() => resolvePort(port));
-      } else {
-        reject(new Error('no port'));
-      }
-    });
-  });
-}
-
-async function startServer(script: string, project: string): Promise<Running> {
-  const port = await freePort();
-  const child = spawn(process.execPath, [script, '--project', project], {
-    env: { ...process.env, SDD_LEARN_PORT: String(port), SDD_LEARN_HOME: mkdtempSync(join(tmpdir(), 'learn-e2e-home-')) },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let stdout = '';
-  let stderr = '';
-  child.stdout!.on('data', (d: Buffer) => (stdout += d.toString()));
-  child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
-  await new Promise<void>((resolveReady, reject) => {
-    const timer = setTimeout(() => reject(new Error(`server did not start: ${stderr}`)), SERVER_START_TIMEOUT_MS);
-    const poll = setInterval(() => {
-      if (stdout.includes('listening')) {
-        clearTimeout(timer);
-        clearInterval(poll);
-        resolveReady();
-      } else if (child.exitCode !== null) {
-        clearTimeout(timer);
-        clearInterval(poll);
-        reject(new Error(`server exited ${child.exitCode}: ${stderr}`));
-      }
-    }, 20);
-  });
-  return { child, port, stderr: () => stderr };
-}
+const startServer = (script: string, project: string): Promise<Running> =>
+  startLearnServer({ project, home: tmp('learn-e2e-home-'), script, claude: null });
 
 /** Raw HTTP request: sends the path byte-for-byte, so WHATWG URL normalisation cannot hide traversal attempts. */
 function rawGet(port: number, path: string, host = '127.0.0.1'): Promise<{ status: number; body: string; type: string }> {
@@ -85,9 +39,7 @@ function rawGet(port: number, path: string, host = '127.0.0.1'): Promise<{ statu
   });
 }
 
-function stop(running: Running | undefined): void {
-  if (running && running.child.exitCode === null) running.child.kill('SIGTERM');
-}
+const stop = (running: Running | undefined): Promise<void> => running?.stop() ?? Promise.resolve();
 
 // --- Real bundle, run exactly as the acceptance criterion states -------------------------------
 
@@ -96,14 +48,13 @@ describe('bundled learn-app/server.js on loopback', () => {
   let running: Running;
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), 'learn-e2e-'));
+    root = tmp('learn-e2e-');
     mkdirSync(join(root, 'project'));
     running = await startServer(BUNDLE, join(root, 'project'));
   }, SERVER_START_TIMEOUT_MS + 5_000);
 
-  afterAll(() => {
-    stop(running);
-    rmSync(root, { recursive: true, force: true });
+  afterAll(async () => {
+    await stop(running);
   });
 
   it('GET / on 127.0.0.1 returns the SPA shell with an empty wave strip', async () => {
@@ -135,27 +86,40 @@ describe('bundled learn-app/server.js on loopback', () => {
     }
   });
 
-  it('GET /api/health on the LAN address is refused because the server does not bind 0.0.0.0', async () => {
-    const lan = Object.values(networkInterfaces())
-      .flat()
-      .find((a) => a && a.family === 'IPv4' && !a.internal)?.address;
-    // Positive control: loopback works on the same port right now.
-    expect((await rawGet(running.port, '/api/health')).status).toBe(200);
-    if (!lan) return; // host has no non-loopback IPv4; nothing to probe
-    const accepted = await new Promise<boolean>((resolveConn) => {
-      const socket = connect({ host: lan, port: running.port });
+  it.skipIf(process.platform !== 'linux')('the listening socket is bound to 127.0.0.1 only (/proc/net/tcp shows 0100007F, never 00000000)', () => {
+    const portHex = running.port.toString(16).toUpperCase().padStart(4, '0');
+    const LISTEN = '0A';
+    const rows = readFileSync('/proc/net/tcp', 'utf8').split('\n').slice(1).map((l) => l.trim().split(/\s+/));
+    const listeners = rows.filter((c) => c[3] === LISTEN && c[1]?.endsWith(`:${portHex}`)).map((c) => c[1].split(':')[0]);
+    expect(listeners, `no IPv4 listener found on port ${running.port}`).not.toEqual([]);
+    expect(listeners).toEqual(['0100007F']);
+    const v6 = existsSync('/proc/net/tcp6')
+      ? readFileSync('/proc/net/tcp6', 'utf8').split('\n').slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c[3] === LISTEN && c[1]?.endsWith(`:${portHex}`))
+      : [];
+    expect(v6, 'server must not also listen on an IPv6 wildcard').toEqual([]);
+  });
+
+  const lan = Object.values(networkInterfaces())
+    .flat()
+    .find((a) => a && a.family === 'IPv4' && !a.internal)?.address;
+
+  // Only ECONNREFUSED proves "not bound"; a timeout would mean a firewall drop and proves nothing.
+  it.skipIf(!lan)('a TCP connect to the LAN address on the server port is refused with ECONNREFUSED', async () => {
+    expect((await rawGet(running.port, '/api/health')).status, 'positive control: loopback must answer').toBe(200);
+    const outcome = await new Promise<string>((resolveConn) => {
+      const socket = connect({ host: lan!, port: running.port });
       socket.setTimeout(2000);
       socket.once('connect', () => {
         socket.destroy();
-        resolveConn(true);
+        resolveConn('connected');
       });
-      socket.once('error', () => resolveConn(false));
+      socket.once('error', (e: NodeJS.ErrnoException) => resolveConn(e.code ?? 'error'));
       socket.once('timeout', () => {
         socket.destroy();
-        resolveConn(false);
+        resolveConn('timeout');
       });
     });
-    expect(accepted).toBe(false);
+    expect(outcome).toBe('ECONNREFUSED');
   });
 
   it('bundle imports only Node built-ins so it runs without node_modules', () => {
@@ -180,7 +144,7 @@ describe('bundle copy with no node_modules ancestor', () => {
   const SECRET = 'TOP-SECRET-FIXTURE';
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), 'learn-trav-'));
+    root = tmp('learn-trav-');
     const app = join(root, 'app');
     mkdirSync(app, { recursive: true });
     cpSync(BUNDLE, join(app, 'server.js'));
@@ -191,9 +155,8 @@ describe('bundle copy with no node_modules ancestor', () => {
     running = await startServer(join(app, 'server.js'), join(root, 'project'));
   }, SERVER_START_TIMEOUT_MS + 5_000);
 
-  afterAll(() => {
-    stop(running);
-    rmSync(root, { recursive: true, force: true });
+  afterAll(async () => {
+    await stop(running);
   });
 
   it('bundle copy outside the repo starts and answers /api/health', async () => {
@@ -246,4 +209,33 @@ describe('bundle copy with no node_modules ancestor', () => {
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual({ jobs: [] });
   });
+});
+
+// --- Default port ---------------------------------------------------------------------------------
+
+/** True when something already listens on 127.0.0.1:port. */
+async function portInUse(port: number): Promise<boolean> {
+  return new Promise((res) => {
+    const socket = connect({ host: '127.0.0.1', port });
+    socket.once('connect', () => {
+      socket.destroy();
+      res(true);
+    });
+    socket.once('error', () => res(false));
+  });
+}
+
+const DEFAULT_PORT = 4747;
+const defaultPortBusy = await portInUse(DEFAULT_PORT);
+
+describe('default port', () => {
+  // Visible skip: 4747 belongs to somebody else on this machine, so the default cannot be observed.
+  it.skipIf(defaultPortBusy)('listens on 4747 when SDD_LEARN_PORT is unset', async () => {
+    const { project, home } = makeProject({});
+    const srv = await startLearnServer({ project, home, port: null, claude: null });
+    expect(srv.stdout()).toContain(`http://127.0.0.1:${DEFAULT_PORT}`);
+    const res = await rawGet(DEFAULT_PORT, '/api/health', '127.0.0.1');
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+  }, 20_000);
 });
