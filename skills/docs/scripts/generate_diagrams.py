@@ -32,10 +32,8 @@ PLANTUML_DOWNLOAD_URL = "https://github.com/plantuml/plantuml/releases/latest/do
 PLANTUML_JAR_CACHE = Path.home() / ".local" / "share" / "plantuml" / "plantuml.jar"
 SVG_NS = "{http://www.w3.org/2000/svg}"
 WARNING_MARKERS = [
-    re.compile(r"^Please\s+use\b"),
-    re.compile(r"\bdeprecated\b", re.IGNORECASE),
-    re.compile(r"^Warning\b"),
-    re.compile(r"Syntax\s+Error"),
+    re.compile(r"^Please\s+use\s+CSS\s+style\s+instead\s+of\s+skinparam\b"),
+    re.compile(r"^Syntax\s+Error\?"),
 ]
 
 
