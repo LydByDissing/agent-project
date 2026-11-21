@@ -1,7 +1,7 @@
 Containers
 ==========
 
-The system boundary contains three logical containers. Because the plugin
+The system boundary contains seven logical containers. Because the plugin
 runs inside Claude Code (not as a deployed service), "containers" here map
 to distinct runtime contexts and storage layers rather than Docker images
 or cloud services.
@@ -42,6 +42,28 @@ Elements
        the Docs skill; read by the user and by Plan (to populate task briefs)
        and Arch-Review (to check REQ coverage and C4 boundaries).
 
+   * - Learn App
+     - Application
+     - Node (Hono) + Vite SPA, shipped in the plugin as ``learn-app/``
+     - Local web app for the operator: on-topic lessons during waves,
+       quizzes personalised by ``claude -p``, interest and mastery tracking.
+       See :doc:`components/learn-app`.
+   * - Learn Library
+     - Data Store
+     - Markdown + YAML front matter + SVG in ``<project>/learn/``
+     - Generic teaching content, committed in the project repo, organised as
+       domain / topic / lesson. Separate from the Sphinx docs site (ADR-001).
+   * - Learner State
+     - Data Store
+     - JSON in ``~/.sdd/learner.json`` (operator home, shared by all projects)
+     - Per-operator interest, mastery and answer history. Follows the person
+       across projects and is never committed.
+   * - Run Status
+     - Data Store
+     - JSON in ``<project>/.sdd/now.json`` (gitignored)
+     - Live wave and job status written by the Conductor, read by the Learn
+       App to stay on topic.
+
 Key Relationships
 -----------------
 
@@ -58,6 +80,14 @@ Key Relationships
 - **SDD Skills → Claude API**: The orchestrator spawns sub-agent invocations
   for each pipeline phase. Each sub-agent reads its SKILL.md and operates
   with its own context window.
+
+- **SDD Skills → Learn Library**: The Plan Skill writes or refreshes
+  lessons for the topics its jobs touch.
+- **SDD Skills → Learner State / Learn App**: The Conductor writes
+  ``<project>/.sdd/now.json`` at each wave and starts and opens the Learn
+  App. The Learn App reads and writes ``~/.sdd/learner.json``.
+- **Learn App → Claude**: Through ``claude -p`` for quiz generation
+  (ADR-003).
 
 Assumptions
 -----------

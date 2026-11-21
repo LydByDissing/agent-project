@@ -15,3 +15,4 @@ pre-rendered to SVG. To regenerate all diagrams run::
    context
    containers
    components/sdd-skills
+   components/learn-app
