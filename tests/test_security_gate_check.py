@@ -105,11 +105,12 @@ def add_design(r, tree=None, outcome="ok"):
 
 def post_repo(tmp_path, name="p"):
     r = add_design(design_repo(tmp_path, name))
+    r.dtree = r.tree()
     r.w("skills/s.md", "skill v2\n")
     r.w("docs/source/c.rst", "C\n")
     i1 = r.commit("implement")
     r.w("docs/source/security/threat-model/my-box.rst", threat("mitigated", decided=True))
-    rows = [row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "skills/**=accepted docs/source/security/**=accepted", "2")]
+    rows = [row("design", r.base, r.base, r.dtree), row("post", r.base, i1, r.tree(), "skills/**=accepted docs/source/security/**=accepted", "2")]
     r.w("docs/source/security/reviews.rst", table(rows))
     r.i1 = i1
     r.psha = r.commit("post gate")
@@ -348,7 +349,7 @@ def test_rebase_record_requires_operator_decision(tmp_path):
     r.w("docs/source/security/reviews.rst", table(rows))
     r.commit("rebase unconfirmed")
     fails(r.check("design", new), "differs from recorded base")
-    rows[1] = row("rebase", new, new, "", "", "2", outcome="decided_by=operator 2026-11-22")
+    rows.append(row("rebase", new, new, "", "", "3", outcome="decided_by=operator 2026-11-22"))
     r.w("docs/source/security/reviews.rst", table(rows))
     r.commit("rebase confirmed")
     rc, out, err = r.check("design", new)
@@ -473,3 +474,69 @@ def test_edited_post_row_is_not_added(tmp_path):
     r.w("docs/source/security/reviews.rst", text.replace("     - ok\n", "     - edited\n"))
     r.commit("edit existing rows")
     fails(r.check("post", r.base), "was not added by the latest commit touching reviews.rst")
+
+
+def append_only(r, *args):
+    p = subprocess.run([sys.executable, str(GATE), "append-only", "--run", RUN, "--repo", str(r.p), *args], capture_output=True, text=True)
+    return p.returncode, p.stdout, p.stderr
+
+
+def test_check_runs_append_only_altered_row_between_gates(tmp_path):
+    r = post_repo(tmp_path)
+    assert r.check("post", r.base)[0] == 0
+    text = (r.p / "docs/source/security/reviews.rst").read_text()
+    r.w("docs/source/security/reviews.rst", text.replace("     - ok\n", "     - rewritten\n", 1))
+    r.commit("alter design row")
+    fails(r.check("post", r.base), "altered")
+
+
+def test_check_runs_append_only_removed_threat_design(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    assert r.check("design", r.base)[0] == 0
+    r.w("docs/source/security/threat-model/my-box.rst", "")
+    r.commit("drop threats")
+    rc, out, err = r.check("design", r.base)
+    assert rc == 1 and "disappeared" in err
+
+
+def test_append_only_working_tree_sees_uncommitted_edit(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    assert append_only(r, "--since", r.base)[0] == 0
+    f = r.p / "docs/source/security/reviews.rst"
+    f.write_text(f.read_text().replace("     - ok\n", "     - rewritten\n", 1))
+    assert append_only(r, "--since", r.dsha)[0] == 0
+    rc, out, err = append_only(r, "--since", r.dsha, "--working-tree")
+    assert rc == 1 and "altered" in err
+    r.commit("commit the edit")
+    assert append_only(r, "--since", r.dsha)[0] == 1
+
+
+def test_threat_without_req_link_counts_for_feature_and_is_reported(tmp_path):
+    r = design_repo(tmp_path)
+    r.w("docs/source/security/threat-model/my-box.rst", threat(decided=True) + "\n.. threat:: n\n   :id: THREAT-MY-BOX-002\n   :status: mitigated\n   :links: THREAT-MY-BOX-001\n")
+    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree())]))
+    r.commit("rec")
+    fails(r.check("design", r.base), "THREAT-MY-BOX-002 has no REQ link")
+
+
+def test_unlinked_open_threat_fails_post(tmp_path):
+    r = post_repo(tmp_path)
+    f = r.p / "docs/source/security/threat-model/my-box.rst"
+    f.write_text(f.read_text() + "\n.. threat:: n\n   :id: THREAT-MY-BOX-002\n   :status: open\n   :links:\n")
+    r.commit("unlinked open threat")
+    rc, out, err = r.check("post", r.base)
+    assert rc == 1 and "THREAT-MY-BOX-002 is open" in err
+
+
+def test_validate_finding_needs_feature_req_link(tmp_path):
+    d = tmp_path / "docs"
+    (d / "specs").mkdir(parents=True)
+    (d / "specs" / "f.rst").write_text(SPEC)
+    (d / "security" / "threat-model").mkdir(parents=True)
+    (d / "security" / "threat-model" / "my-box.rst").write_text(threat())
+    data = lib.load(d)
+    base = {"id": "F1", "severity": "high", "stride": "T", "element": "x", "anchor": "a", "threat": "t", "mitigation": "m"}
+    data["c4"] = {"x"}
+    for links, bad in (([], True), (["THREAT-MY-BOX-001"], True), (["REQ-X-001"], False), (["THREAT-MY-BOX-001", "REQ-X-001"], False)):
+        errs = lib.validate_findings([{**base, "links": links}], data, FEAT)
+        assert bool([e for e in errs if "REQ id" in e]) == bad, (links, errs)

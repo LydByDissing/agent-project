@@ -207,6 +207,8 @@ def validate_findings(findings: list, data: dict, feat: str) -> list[str]:
             if not parts:
                 errs.append(f"finding {tag}: element {el!r} is not a C4 id")
             errs += [f"finding {tag}: C4 element {p!r} not found in docs/source/architecture" for p in parts if p not in data["c4"]]
+        if "links" in f and not any(lk.startswith("REQ-") for lk in str_links(f["links"])):
+            errs.append(f"finding {tag}: links carry no REQ id belonging to feature {feat}")
         for lk in str_links(f["links"]) if "links" in f else []:
             if lk.startswith("REQ-"):
                 if lk not in {n["opts"].get("id") for n in data["needs"] if n["type"] == "req"}:
@@ -348,7 +350,11 @@ def first_base(repo: Path, run: str) -> tuple[str, str]:
 
 def linked_threats(data: dict, feat: str) -> list[dict]:
     reqs = feat_reqs(data, feat)
-    return [t for t in data["threats"] if set(split_ids(t["opts"].get("links", ""))) & reqs]
+    return [t for t in data["threats"] if set(split_ids(t["opts"].get("links", ""))) & reqs or not has_req_link(t)]
+
+
+def has_req_link(t: dict) -> bool:
+    return any(x.startswith("REQ-") for x in split_ids(t["opts"].get("links", "")))
 
 
 RESOLVED = ("noted", "accepted", "mitigated")
@@ -430,6 +436,9 @@ def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main:
         elif want != tree_hash(repo, feat, run):
             errs.append(f"tree sha256 differs from review record ({want[:12]} recorded, {tree_hash(repo, feat, run)[:12]} current)")
     lt = linked_threats(data, feat)
+    errs += [f"threat {t['opts'].get('id')} has no REQ link; counted as belonging to {feat}" for t in lt if not has_req_link(t)]
+    if base and head:
+        errs += run_append_only(repo, run, check_since(repo, run, base))
     if stage == "design":
         errs += [f"threat {t['opts'].get('id')} is open without a decision for run {run}" for t in lt if is_open(t) and not has_decision(t, run)]
     else:
@@ -606,11 +615,30 @@ def head_errs(new: dict, run: str) -> list[str]:
     return errs
 
 
-def run_append_only(repo: Path, run: str, since: list[str]) -> list[str]:
+def sec_records_wt(repo: Path) -> dict:
+    needs: list[dict] = []
+    reviews: list[dict] = []
+    for p in sorted((repo / SECURITY_REL).rglob("*.rst")):
+        f = p.relative_to(repo).as_posix()
+        txt = p.read_text(encoding="utf-8")
+        if f == REVIEWS_REL:
+            reviews = parse_reviews_text(txt)
+        needs += [n for n in parse_needs_text(txt, f) if n["type"] in ("threat", "risk")]
+    return {"needs": {n["opts"].get("id", ""): n for n in needs if n["opts"].get("id")}, "reviews": reviews}
+
+
+def check_since(repo: Path, run: str, base: str) -> list[str]:
+    rc, txt = git(repo, "show", f"HEAD:{REVIEWS_REL}")
+    rows = [r for r in parse_reviews_text(txt) if r.get("run") == run] if rc == 0 else []
+    heads = [rev(repo, rec_head(rows[-1]))] if rows else []
+    return list(dict.fromkeys([c for c in [base, *heads, latest_review_commit(repo, run)] if c]))
+
+
+def run_append_only(repo: Path, run: str, since: list[str], working_tree: bool = False) -> list[str]:
     errs: list[str] = []
-    new = sec_records(repo, "HEAD")
     if not rev(repo, "HEAD"):
         return ["HEAD does not resolve to a commit"]
+    new = sec_records_wt(repo) if working_tree else sec_records(repo, "HEAD")
     for s in since:
         c = rev(repo, s)
         if not c:

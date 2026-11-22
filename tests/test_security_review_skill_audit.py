@@ -537,7 +537,7 @@ def test_defect_append_only_before_commit_blocks_alteration(flow):
     assert flow.append_only().returncode == 1
 
 
-def test_defect_threat_without_feature_req_link_is_invisible_to_gate(flow):
+def test_threat_without_feature_req_link_fails_the_gate(flow):
     body = sample_threat_open().replace(f":links: {REQ}", ":links: ")
     flow.add_threat(body, "THREAT-LEARN-SERVER-006")
     design_row = flow
@@ -549,7 +549,8 @@ def test_defect_threat_without_feature_req_link_is_invisible_to_gate(flow):
     flow.row("post", "1", protected="docs/source/security/**=accepted")
     flow.commit_security("post", "1")
     c = flow.check("post")
-    assert c.returncode == 0, "an open threat with no REQ link must not slip past, or the gate now catches it"
+    assert c.returncode == 1
+    assert "THREAT-LEARN-SERVER-006" in c.stderr
 
 
 @pytest.mark.xfail(strict=True, reason="SKILL defect: Step 6 writes :links: from the finding (analyst may emit [] or only THREAT ids) and never says to link the feature's REQ, so the gate ignores the open threat and passes wrongly")

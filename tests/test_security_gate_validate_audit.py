@@ -240,14 +240,14 @@ def test_req_link_passes_when_feature_under_review_is_the_other_one(docs):
 
 
 def test_threat_link_to_threat_of_feature_passes(docs):
-    r = validate(docs, [finding(links=["THREAT-MY-BOX-002"])])
+    r = validate(docs, [finding(links=["REQ-A-001", "THREAT-MY-BOX-002"])])
 
     assert r.returncode == 0, r.stderr
 
 
 def test_threat_link_linking_both_features_passes_for_either(docs):
-    assert validate(docs, [finding(links=["THREAT-MY-BOX-001"])]).returncode == 0
-    assert validate(docs, [finding(links=["THREAT-MY-BOX-001"])], feat="FEAT-B").returncode == 0
+    assert validate(docs, [finding(links=["REQ-A-002", "THREAT-MY-BOX-001"])]).returncode == 0
+    assert validate(docs, [finding(links=["REQ-B-001", "THREAT-MY-BOX-001"])], feat="FEAT-B").returncode == 0
 
 
 def test_threat_link_that_does_not_resolve_is_rejected(docs):

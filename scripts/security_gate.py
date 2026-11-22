@@ -62,7 +62,7 @@ def cmd_tree_hash(a) -> int:
 def cmd_append_only(a) -> int:
     repo = Path(a.repo).resolve()
     since = [x for x in (a.since or "").split(",") if x] or lib.default_since(repo, a.run)
-    errs = lib.run_append_only(repo, a.run, since)
+    errs = lib.run_append_only(repo, a.run, since, a.working_tree)
     print(f"append-only run {a.run} since {','.join(x[:8] for x in since) or '-'}: {'FAIL' if errs else 'ok'}")
     for e in errs:
         print(f"ERROR {e}", file=sys.stderr)
@@ -104,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     o = sub.add_parser("append-only")
     o.add_argument("--run", required=True)
     o.add_argument("--since")
+    o.add_argument("--working-tree", action="store_true")
     o.add_argument("--repo", default=str(DOCS.parent.parent))
     o.set_defaults(fn=cmd_append_only)
     r = sub.add_parser("redact-check")

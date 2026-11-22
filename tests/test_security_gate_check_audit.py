@@ -36,10 +36,11 @@ def ok(res):
 
 def post_with(tmp_path, name, path, listed, body="x\n"):
     r = add_design(design_repo(tmp_path, name))
+    design = row("design", r.base, r.base, r.tree())
     r.w(path, body)
     i1 = r.commit("implement")
     r.w(TM, threat("mitigated", decided=True))
-    rows = [row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), f"{SEC} {listed}".replace(" -", ""), "2")]
+    rows = [design, row("post", r.base, i1, r.tree(), f"{SEC} {listed}".replace(" -", ""), "2")]
     r.w(REV, table(rows))
     r.i1 = i1
     r.commit("post gate")
@@ -324,11 +325,11 @@ def test_threat_decision_with_run_list_counts(tmp_path):
 
 
 def test_threat_linked_only_to_other_feature_is_ignored(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = design_repo(tmp_path)
     r.w("docs/source/specs/features/g.rst", ".. feat:: Y\n   :id: FEAT-Y\n\n.. req:: R\n   :id: REQ-Y-001\n   :links: FEAT-Y\n")
     r.w("docs/source/security/threat-model/other-box.rst", ".. threat:: o\n   :id: THREAT-OTHER-BOX-001\n   :status: open\n   :links: REQ-Y-001\n")
-    r.w(REV, table([row("design", r.base, r.base, r.tree())]))
     r.commit("other feature threat")
+    r = add_design(r)
     ok(chk(r, "design", r.base))
 
 
