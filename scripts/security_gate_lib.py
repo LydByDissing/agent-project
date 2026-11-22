@@ -629,11 +629,14 @@ KEY_PATS = (
     ("private-key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----")),
 )
 TOKEN = re.compile(r"[A-Za-z0-9_+=-]{32,}")
-HEX = re.compile(r"[0-9a-f]+")
-SHA_CTX = re.compile(r"sha256|sdd-source-sha256|\bbase=|\b(?:tree|base|range|head|commit)\b\s*[:=]", re.I)
+HEX = re.compile(r"[0-9a-fA-F]+")
+SHA_PRE = re.compile(r"(?:sha256|sdd-source-sha256|base|tree|range|head|commit)\s*[:=]\s*[`\"']?(?:[0-9a-f]{7,64}\.\.\.?)?$", re.I)
+SHA_COLS = ("base", "range", "head", "tree")
 ENT_MIN = 4.2
+SEG_ENT_MIN = 3.5
 HEX_ENT_MIN = 3.0
-SKIP_EXT = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".woff", ".woff2", ".zip", ".gz", ".pyc")
+SKIP_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".woff", ".woff2", ".zip", ".gz", ".pyc")
+SEC_DIR = "docs/source/security/"
 
 
 def mask(v: str) -> str:
@@ -644,29 +647,69 @@ def entropy(t: str) -> float:
     return -sum(c / len(t) * math.log2(c / len(t)) for c in (t.count(x) for x in set(t)))
 
 
+def mixed(t: str) -> bool:
+    return any(c.isdigit() for c in t) and any(c.isalpha() for c in t)
+
+
 def tok_kind(t: str, sha_ok: bool) -> str:
     if HEX.fullmatch(t):
-        return "" if sha_ok and len(t) in (40, 64) else ("high-entropy-hex" if entropy(t) >= HEX_ENT_MIN else "")
-    seg = [x for x in re.split(r"[-_]", t) if x]
-    if len(seg) > 2 and sum(x.isalpha() or x.isdigit() for x in seg) * 10 >= len(seg) * 6:
-        return ""
-    mixed = any(c.isdigit() for c in t) and any(c.isalpha() for c in t)
-    return "high-entropy-token" if mixed and entropy(t) >= ENT_MIN else ""
+        if sha_ok and len(t) in (40, 64) and t == t.lower():
+            return ""
+        return "high-entropy-hex" if entropy(t) >= HEX_ENT_MIN else ""
+    segs = [x for x in re.split(r"[-_]", t) if x]
+    if len(segs) > 1:
+        return "high-entropy-token" if any(len(x) >= 20 and mixed(x) and entropy(x) >= SEG_ENT_MIN for x in segs) else ""
+    return "high-entropy-token" if mixed(t) and entropy(t) >= ENT_MIN else ""
+
+
+def wrapped_hits(lines: list[str]) -> list[tuple[int, str, str]]:
+    starts = []
+    pos = 0
+    for l in lines:
+        starts.append(pos)
+        pos += len(l.strip())
+    joined = "".join(l.strip() for l in lines)
+    ln = lambda i: max(j for j, st in enumerate(starts) if st <= i) + 1
+    return [(ln(m.start()), k, m.group(0)) for k, r in KEY_PATS[:-1] for m in r.finditer(joined) if ln(m.start()) != ln(m.end() - 1)]
+
+
+def review_cols(lines: list[str]) -> dict[int, bool]:
+    out: dict[int, bool] = {}
+    names: list[str] = []
+    idx = -1
+    for n, raw in enumerate(lines, 1):
+        head = raw.startswith("   * - ")
+        if head or (raw.startswith("     - ") and idx >= 0):
+            idx = 0 if head else idx + 1
+            cell = raw.split("- ", 1)[1].strip().strip("`").lower()
+            if head and not names:
+                names = [cell]
+            elif len(names) > 0 and idx == len(names) and not out:
+                names.append(cell)
+            elif idx < len(names):
+                out[n] = names[idx] in SHA_COLS
+        elif raw.strip() and not raw.startswith("   "):
+            idx = -1
+    return out
 
 
 def redact_text(text: str, name: str, sha_file: bool = False) -> list[str]:
     out: list[str] = []
-    for ln, raw in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    cols = review_cols(lines) if sha_file else {}
+    found: list[tuple[int, int, str, str]] = [(ln, 0, k, v) for ln, k, v in wrapped_hits(lines)]
+    for ln, raw in enumerate(lines, 1):
         hits = [(m.start(), k, m.group(0)) for k, r in KEY_PATS for m in r.finditer(raw)]
         spans = [(m.start(), m.end()) for _, _, v in hits for m in [re.search(re.escape(v), raw)] if m]
-        sha_ok = sha_file or bool(SHA_CTX.search(raw))
         for m in TOKEN.finditer(raw):
             if any(a <= m.start() < b for a, b in spans):
                 continue
-            k = tok_kind(m.group(0), sha_ok)
+            ok = cols.get(ln, False) or bool(SHA_PRE.search(raw[: m.start()]))
+            k = tok_kind(m.group(0), ok)
             if k:
                 hits.append((m.start(), k, m.group(0)))
-        out += [f"{name}:{ln}: {k} {mask(v)}" for _, k, v in sorted(hits)]
+        found += [(ln, i, k, v) for i, k, v in hits]
+    out += [f"{name}:{ln}: {k} {mask(v)}" for ln, _, k, v in sorted(found)]
     return out
 
 
@@ -678,8 +721,12 @@ def redact_scan(paths: list[Path], root: Path) -> list[str]:
         except OSError as e:
             out.append(f"{p}: unreadable: {e.strerror}")
             continue
-        out += redact_text(txt, str(p), p.name == "reviews.rst")
+        out += redact_text(txt, str(p), p.as_posix().endswith(SEC_DIR + "reviews.rst"))
     return out
+
+
+def skip_file(x: Path) -> bool:
+    return x.suffix in SKIP_EXT or (x.suffix == ".svg" and SEC_DIR not in x.as_posix() + "/")
 
 
 def redact_paths(repo: Path, paths: list[str], feat: str, run: str) -> list[Path]:
@@ -691,5 +738,5 @@ def redact_paths(repo: Path, paths: list[str], feat: str, run: str) -> list[Path
             roots += sorted((repo / "docs/source/design_log").glob(f"{log_name(feat, run)}*.rst"))
     out: list[Path] = []
     for r in roots:
-        out += sorted(x for x in r.rglob("*") if x.is_file() and x.suffix not in SKIP_EXT) if r.is_dir() else [r]
+        out += sorted(x for x in r.rglob("*") if x.is_file() and not skip_file(x)) if r.is_dir() else [r]
     return out

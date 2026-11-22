@@ -98,7 +98,12 @@ def test_sha256_field_passes(tmp_path):
 
 def test_review_row_with_shas_passes(tmp_path):
     row = f"   * - 87708f1a\n     - post\n     - {HEX40}\n     - {HEX40}..{HEX40}\n     - {HEX64}\n"
-    assert one(tmp_path, row, "reviews.rst")[0] == 0
+    hdr = "   * - Run\n     - Stage\n     - Base\n     - Range\n     - Tree\n"
+    d = tmp_path / "docs" / "source" / "security"
+    d.mkdir(parents=True)
+    f = d / "reviews.rst"
+    f.write_text("x\n\n" + hdr + "   * - 87708f1a\n     - post\n     - " + HEX40 + "\n     - " + HEX40 + ".." + HEX40 + "\n     - " + HEX64 + "\n")
+    assert run("--paths", str(f))[0] == 0
 
 
 def test_bare_sha_outside_reviews_fails(tmp_path):

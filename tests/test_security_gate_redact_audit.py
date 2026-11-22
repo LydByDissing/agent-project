@@ -56,13 +56,11 @@ def detect(tmp_path: Path, secret: str, text: str, name: str = "a.rst"):
     assert masked(secret, out), out
 
 
-@pytest.mark.xfail(strict=True, reason="major: 60% segment rule skips word-prefixed hyphen secrets")
 def test_hyphen_segmented_prod_db_prefix(tmp_path):
     s = "prod-db-" + rnd(1, 24)
     detect(tmp_path, s, f"password {s}\n")
 
 
-@pytest.mark.xfail(strict=True, reason="major: 60% segment rule skips word-prefixed hyphen secrets")
 def test_hyphen_segmented_long_variants(tmp_path):
     for i, pre in enumerate(("prod-db-", "stage-api-key-", "my-live-")):
         s = pre + rnd(20 + i, 28)
@@ -80,7 +78,6 @@ def test_underscore_segmented_prod_db(tmp_path):
     detect(tmp_path, s, f"pw={s}\n")
 
 
-@pytest.mark.xfail(strict=True, reason="major: 60% segment rule skips word-prefixed hyphen secrets")
 def test_secret_with_alpha_digit_segments_hidden_by_sixty_percent_rule(tmp_path):
     s = "a-b-c-" + rnd(4, 26)
     rc, out = scan(tmp_path, f"{s}\n")
@@ -122,7 +119,6 @@ def test_random_base64_blobs_always_detected(tmp_path):
     assert not miss, f"{len(miss)}/60 random 88-char base64 blobs undetected"
 
 
-@pytest.mark.xfail(strict=True, reason="minor: line-based scan misses secrets wrapped over lines")
 def test_prefix_key_split_across_lines(tmp_path):
     k = "AK" + "IA" + rnd(50, 16).upper()
     text = f"leaked key {k[:10]}\n{k[10:]}\n"
@@ -130,7 +126,6 @@ def test_prefix_key_split_across_lines(tmp_path):
     assert rc == 1
 
 
-@pytest.mark.xfail(strict=True, reason="minor: line-based scan misses secrets wrapped over lines")
 def test_github_token_split_across_lines(tmp_path):
     k = "gh" + "p_" + rnd(51, 36)
     rc, out = scan(tmp_path, f"token {k[:18]}\n{k[18:]}\n")
@@ -167,7 +162,6 @@ def test_token_as_query_value_in_link(tmp_path):
     detect(tmp_path, s, f"[docs](https://example.com/x?a=1&token={s}&b=2)\n", "a.md")
 
 
-@pytest.mark.xfail(strict=True, reason="minor: directory expansion skips svg text under security docs")
 def test_secret_in_svg_under_security_dir_via_directory(tmp_path):
     d = tmp_path / "docs" / "source" / "security"
     d.mkdir(parents=True)
@@ -186,14 +180,12 @@ def test_secret_in_svg_explicit_path_scanned(tmp_path):
     assert rc == 1 and masked(k, so + se)
 
 
-@pytest.mark.xfail(strict=True, reason="minor: reviews.rst allowlist covers every cell")
 def test_hex64_in_reviews_outcome_cell(tmp_path):
     h = rhex(60, 64)
     rc, out = scan(tmp_path, f"   * - 87708f1a\n     - post\n     - passed key {h}\n", "reviews.rst")
     assert rc == 1, "reviews.rst allowlists any 40/64 hex in any cell"
 
 
-@pytest.mark.xfail(strict=True, reason="minor: allowlist keyed on file name reviews.rst anywhere")
 def test_hex_in_reviews_named_file_elsewhere(tmp_path):
     d = tmp_path / "other"
     d.mkdir()
@@ -234,7 +226,6 @@ def test_sha_on_base_line_passes(tmp_path):
     assert scan(tmp_path, f"Range: {h}..{rhex(73, 40)}\n")[0] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="minor: sha context allowlists whole line")
 def test_sha_context_does_not_hide_other_hex_on_line(tmp_path):
     h = rhex(74, 64)
     rc, out = scan(tmp_path, f"base: {rhex(75, 40)} password {h}\n")
@@ -247,7 +238,6 @@ def test_sha_context_does_not_hide_mixed_token(tmp_path):
     assert rc == 1 and masked(s, out)
 
 
-@pytest.mark.xfail(strict=True, reason="minor: uppercase hex below entropy threshold, not matched by HEX rule")
 def test_uppercase_hex_secret_detected(tmp_path):
     h = rhex(78, 64).upper()
     rc, out = scan(tmp_path, f"key {h}\n")
