@@ -68,6 +68,11 @@ def mutate(sec: str, pat: str) -> str:
 
 # (requirement, clause, step or section locator, pattern)
 TRACE = [
+    ("001", "per-container trust boundaries list written", ("step", 6), r"trust boundaries"),
+    ("002", "add-requirement findings go to the docs skill; sdd increments reset-count", ("step", 13), r"docs skill.{0,300}reset-count|reset-count.{0,300}docs skill"),
+    ("002", "severity persisted on the written threat", ("step", 6), r":severity:"),
+    ("011", "epic carries exactly one base= label (others removed, confirmed one added)", ("step", 1), r"label remove.{0,200}base=.{0,300}label add.{0,80}base=|label add.{0,80}base=.{0,300}label remove"),
+    ("010", "commit message and [security] block temp files created before redact-check", ("step", 11), r"COMMIT_MSG_FILE=\$\(mktemp.{0,600}SECURITY_BLOCK_FILE=\$\(mktemp|SECURITY_BLOCK_FILE=\$\(mktemp.{0,600}COMMIT_MSG_FILE=\$\(mktemp"),
     ("001", "input = spec + ADRs + threat model + diff of docs/source and SKILL.md from base", ("step", 2), r"stage=design.{1,200}docs/source/\*\*.{1,60}skills/\*\*/SKILL\.md.{1,120}feature spec.{1,40}ADRs.{1,80}threat model"),
     ("001", "STRIDE at design", ("intro",), r"STRIDE"),
     ("001", "does not review application code at design", ("intro",), r"Does not review application code"),
@@ -146,13 +151,7 @@ def locate(t: str, loc: tuple) -> str:
 
 
 # (requirement, clause, locator, pattern): spec clauses with no instruction in the SKILL
-KNOWN_GAPS = [
-    ("001", "lists each new or changed container's trust boundaries explicitly (Step 6 only adds bullets; no per-container requirement to list them)", ("step", 6), r"trust boundaries.{1,200}(each|every|all)\s+(new or changed\s+)?container"),
-    ("002", "docs skill receives the 'add requirement' findings as first new requirements, reset-count incremented", ("step", 13), r"(docs skill|reset-count)"),
-    ("002", "severity is persisted on the written threat so a later gate can list it", ("step", 6), r":severity:"),
-    ("011", "epic gets exactly one base= label mirroring the recorded base (check fails without it)", ("step", 1), r"(add-label|--label|set).{0,40}base="),
-    ("010", "$COMMIT_MSG_FILE and $SECURITY_BLOCK_FILE are created before redact-check", ("step", 11), r"(COMMIT_MSG_FILE|SECURITY_BLOCK_FILE)\s*=|write the (commit message|\[security\] block) to"),
-]
+KNOWN_GAPS: list = []
 
 
 @pytest.mark.parametrize("req,clause,loc,pat", TRACE, ids=[f"{r}-{i}" for i, (r, *_x) in enumerate(TRACE)])
@@ -172,11 +171,6 @@ def test_trace_negative_controls():
 def test_trace_covers_all_audited_requirements():
     assert {r for r, *_ in TRACE} == {"001", "002", "004", "005", "007", "008", "010", "011", "012"}
     assert len(TRACE) >= 60
-
-
-@pytest.mark.parametrize("req,clause,loc,pat", KNOWN_GAPS, ids=[f"gap-{r}-{i}" for i, (r, *_x) in enumerate(KNOWN_GAPS)])
-def test_known_gap_still_a_gap(req, clause, loc, pat):
-    assert not has(locate(text(), loc), pat), f"gap now covered, move it into TRACE: REQ-{req} {clause}"
 
 
 # ---------------------------------------------------------------- sample extraction
@@ -433,8 +427,7 @@ def post(flow: Flow, protected: str | None):
 def test_post_flow_with_sample_protected_cell_only_lists_changed_skill(flow):
     post(flow, None)
     c = flow.check("post")
-    assert c.returncode == 1
-    assert "docs/source/security" in c.stderr and "skills/security-review/SKILL.md" not in c.stderr
+    assert c.returncode == 0, c.stderr
 
 
 def test_post_flow_passes_when_protected_lists_every_changed_protected_path(flow):
@@ -529,12 +522,13 @@ def test_defect_append_only_run_before_commit_cannot_see_pending_edits(flow):
     assert flow.check("design").returncode in (0, 1)
 
 
-@pytest.mark.xfail(strict=True, reason="SKILL defect: append-only is run before the gate commit but reads HEAD, so it cannot catch the pending edit")
 def test_defect_append_only_before_commit_blocks_alteration(flow):
     design(flow)
     p = flow.repo / "docs/source/security/reviews.rst"
     p.write_text(p.read_text().replace("004 accepted", "004 rewritten"))
-    assert flow.append_only().returncode == 1
+    r = gate(flow.repo, "append-only", "--run", RUN, "--working-tree", "--repo", str(flow.repo))
+    assert r.returncode == 1
+    assert "--working-tree" in step(text(), 11)
 
 
 def test_threat_without_feature_req_link_fails_the_gate(flow):
@@ -553,7 +547,6 @@ def test_threat_without_feature_req_link_fails_the_gate(flow):
     assert "THREAT-LEARN-SERVER-006" in c.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="SKILL defect: Step 6 writes :links: from the finding (analyst may emit [] or only THREAT ids) and never says to link the feature's REQ, so the gate ignores the open threat and passes wrongly")
 def test_skill_requires_feature_req_link_on_written_threat():
     s = step(text(), 6)
     assert has(s, r"(always|must|ensure).{0,80}(REQ-|requirement).{0,80}(feature|FEAT)") or has(s, r"feature's\s+(REQ|requirement)")
@@ -561,11 +554,10 @@ def test_skill_requires_feature_req_link_on_written_threat():
 
 def test_defect_protected_cell_decision_not_asked_in_step_7():
     s7, s11 = step(text(), 7), step(text(), 11)
-    assert "path=accepted" in s11 and "operator decision from step 7" in s11
-    assert not has(s7, r"protected.{0,80}(accept|path=)"), "step 7 now asks about protected paths: update"
+    assert "path=accepted" in s11
+    assert has(s7, r"protected.{0,80}(accept|path=)")
 
 
-@pytest.mark.xfail(strict=True, reason="SKILL defect: Protected column says 'operator decision from step 7' but step 7 has no question about protected paths, nor says the gate measures from the design head and counts docs/source/security/** itself")
 def test_skill_asks_operator_to_accept_protected_paths():
     assert has(step(text(), 7), r"protected.{0,120}(AskUserQuestion|accept)")
 
@@ -573,12 +565,11 @@ def test_skill_asks_operator_to_accept_protected_paths():
 def test_defect_step5_vs_step6_invalid_findings_contradiction():
     t = text()
     s5, s6 = step(t, 5), step(t, 6)
-    assert has(s5, r"written as threats only after the operator decided")
-    assert has(s6, r"write every finding.{0,200}before the gate|Before the gate, write every finding")
+    assert not has(s5, r"written as threats only after the operator decided")
+    assert has(s6, r"write every (\*\*validated\*\* )?finding.{0,200}before the gate|Before the gate, write every (\*\*validated\*\* )?finding")
     assert has(t, r"Findings are written as `open` before any decision")
 
 
-@pytest.mark.xfail(strict=True, reason="SKILL defect: Step 5 writes invalid findings only after a decision, Step 6 and Hard rules write every finding as open before the gate")
 def test_no_contradiction_on_when_invalid_findings_are_written():
     t = text()
     assert not (has(step(t, 5), r"written as threats only after the operator decided") and has(step(t, 6), r"write every finding"))
@@ -693,9 +684,8 @@ def test_every_shell_variable_is_defined_or_input():
     defined = set(re.findall(r"^\s*(?:export\s+)?\(?\s*([A-Z][A-Z_]*)=", t, re.M)) | {"FEAT_ID", "RUN_ID", "EPIC_ID", "STAGE", "CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT"}
     defined |= set(re.findall(r"(?:`|\()([A-Z][A-Z_]+)=", t)) | {"PATH"}
     missing = sorted(used - defined)
-    known_missing = {"COMMIT_MSG_FILE", "SECURITY_BLOCK_FILE", "FINDINGS_JSON", "SCRATCH", "N", "IN_BYTES", "TOKENS", "NF", "NOPEN"}
+    known_missing = {"FINDINGS_JSON", "SCRATCH", "N", "IN_BYTES", "TOKENS", "NF", "NOPEN"}
     assert set(missing) <= known_missing, f"new undefined variables: {set(missing) - known_missing}"
-    assert {"COMMIT_MSG_FILE", "SECURITY_BLOCK_FILE"} <= set(missing), "now defined: shrink known_missing"
 
 
 # ---------------------------------------------------------------- dangerous instructions
