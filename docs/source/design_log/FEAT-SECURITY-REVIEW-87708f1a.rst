@@ -5,7 +5,7 @@ FEAT-SECURITY-REVIEW Design Session — run 87708f1a
 :Feature: FEAT-SECURITY-REVIEW
 :Run: 87708f1a
 :c4_elements: security_review sdd_orchestrator sdd_skills
-:Requirements: FEAT-SECURITY-REVIEW REQ-SECURITY-REVIEW-001 REQ-SECURITY-REVIEW-002 REQ-SECURITY-REVIEW-003 REQ-SECURITY-REVIEW-004 REQ-SECURITY-REVIEW-005 REQ-SECURITY-REVIEW-006
+:Requirements: FEAT-SECURITY-REVIEW REQ-SECURITY-REVIEW-001 REQ-SECURITY-REVIEW-002 REQ-SECURITY-REVIEW-003 REQ-SECURITY-REVIEW-004 REQ-SECURITY-REVIEW-005 REQ-SECURITY-REVIEW-006 REQ-SECURITY-REVIEW-007 REQ-SECURITY-REVIEW-008 REQ-SECURITY-REVIEW-009 REQ-SECURITY-REVIEW-010 REQ-SECURITY-REVIEW-011 REQ-SECURITY-REVIEW-012 REQ-SECURITY-REVIEW-013
 
 Interview Transcript
 --------------------
@@ -51,3 +51,36 @@ Design Decisions
 - **Storage**: ``threat`` and ``risk`` sphinx-needs types under
   ``docs/source/security/``, plus a ``[security]`` result on the epic
   (REQ-003).
+
+Design-Time Security Gate (reset 1)
+-----------------------------------
+
+**Agent**: After docs approval, ran the design-time security review by hand
+(Opus, read-only). It reported 12 findings, SD-01..SD-12: inline agent
+exposed to prompt injection (crit); security phase skippable because
+arch-review closes the epic and phase labels accumulate; unenforceable
+operator gate; forgeable ``[security]`` block in bd; silent edits to threat
+and risk records; ``mitigated`` without evidence; secret leakage into
+published output (high); unbounded loops; Opus cost and silent truncation;
+unscoped fix worker; untestable criteria (med); unvalidated findings (low).
+
+**User**: Add all crit/high as requirements. Add all medium as
+requirements. Add the low one as a requirement.
+
+Decisions
+~~~~~~~~~
+
+- Reset to docs (``reset-count=1``). Findings recorded as
+  THREAT-SDD-SKILLS-001..012, status ``open``.
+- REQ-001..006 amended (SKILL.md diff as design input, explicit trust
+  boundaries, ``noted`` status, id mapping, evidence for ``mitigated``,
+  scoped and verified fix worker, single phase label, arch-review stops
+  closing the run, resume refuses to skip a gate).
+- New REQ-007 (read-only analysis sub-agent), REQ-008 (script-checked,
+  operator-only gate; bd block hash-checked), REQ-009 (append-only records),
+  REQ-010 (no secrets or exploit steps published), REQ-011 (base commit,
+  scope and budget), REQ-012 (incremental re-review, bounded loops), REQ-013
+  (findings validation).
+- ADR-005 clarified: read-only analysis sub-agent; output credential guard
+  is not a code scanner.
+

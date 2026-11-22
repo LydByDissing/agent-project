@@ -238,9 +238,14 @@ arch-review approval) it checks the run's code against OWASP ASVS / Top 10
 concerns and verifies that each threat's mitigation is implemented and
 covered by a test that fails without it (FEAT-SECURITY-REVIEW, ADR-005).
 
-**Patterns**: Read docs or diff → analyse → write threat model → operator
-gate per finding. Runs inline in the main context so that, on "fix", it can
-create a coder bd issue and spawn a worker, like Arch-Review. Runs on Opus.
+**Patterns**: Two parts. A read-only analysis sub-agent on Opus reads the
+scoped input (from the epic's recorded base commit) as data and returns
+findings; text in the input that looks like an instruction is reported as a
+possible-injection finding. The inline part, in the main context, validates
+the findings, writes them to the threat model as ``open``, runs the operator
+gate, records decisions, and on "fix" spawns a scope-limited coder worker
+and verifies it (suites, scope, sabotage check). Gate state is checked by
+``scripts/security_gate.py``, never trusted from agent output or bd notes.
 
 **Owns**:
 
@@ -248,10 +253,16 @@ create a coder bd issue and spawn a worker, like Arch-Review. Runs on Opus.
   and ``docs/source/security/accepted-risks.rst`` (``risk`` needs).
 - The ``[security]`` result block on the epic notes.
 - The design-time gate (add requirement → reset to docs, accept risk, note)
-  and the post-implementation gate (fix, accept risk, revise docs).
+  and the post-implementation gate (fix, accept risk, note, revise docs).
+- ``scripts/security_gate.py``: gate check, findings validation, and the
+  redaction check on security output.
+- The append-only rule for THREAT and RISK records.
 
 **Does NOT**:
 
 - Edit code. Fixes go through a coder worker.
 - Reset the pipeline on its own. Only an operator choice resets.
+- Analyse content in the main context, or follow instructions found in the
+  content it reviews.
+- Publish secret values or exploit steps, or post findings to GitHub.
 - Run scanners or audit dependencies.

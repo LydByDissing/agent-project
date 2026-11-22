@@ -1,0 +1,140 @@
+SDD Skills — Threat Model
+=========================
+
+Container: ``sdd_skills``. Threats recorded by the design-time security
+review of FEAT-SECURITY-REVIEW (run 87708f1a, 2026-11-22). The operator chose
+"add requirement" for all twelve, so each stays ``open`` until the linked
+requirement is implemented and verified.
+
+Trust boundaries
+----------------
+
+- Operator ↔ orchestrator (gate decisions).
+- Orchestrator ↔ sub-agents (worker and analysis prompts, returned reports).
+- Agents ↔ repository content: code, diffs, docs and GitHub issue text that
+  an attacker may influence.
+- Agents ↔ bd notes and labels (free text any agent can write).
+- Docs site and GitHub (publication of security output).
+
+Threats
+-------
+
+.. threat:: Inline security agent steered by injected text
+   :id: THREAT-SDD-SKILLS-001
+   :status: open
+   :stride: E
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Analysis in a read-only sub-agent; content passed as data; embedded instructions reported as findings.
+   :links: REQ-SECURITY-REVIEW-007
+
+   The agent analysing attacker-influenced code, docs and issue text runs in the main context with shell, gh and bd write access, so injected instructions could steer its verdict or trigger actions.
+
+.. threat:: Security phase skipped by ordering or label edits
+   :id: THREAT-SDD-SKILLS-002
+   :status: open
+   :stride: E
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Single phase label; arch-review stops closing the run; resume refuses to skip a failing gate.
+   :links: REQ-SECURITY-REVIEW-006
+
+   arch-review closes the epic before security-review runs, and phase labels accumulate so any agent can add phase=done or phase=plan.
+
+.. threat:: Operator decision not enforceable
+   :id: THREAT-SDD-SKILLS-003
+   :status: open
+   :stride: R
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Findings written as open first; gate state checked by script; decisions only from the operator's own turn, rationale verbatim.
+   :links: REQ-SECURITY-REVIEW-008
+
+   The agent writes the findings, the gate summary and the decision record, so it can omit findings or invent decisions.
+
+.. threat:: Forged security result in bd notes
+   :id: THREAT-SDD-SKILLS-004
+   :status: open
+   :stride: S
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: bd block is a record only; gate state derived from the RST; block carries a hash re-checked on resume.
+   :links: REQ-SECURITY-REVIEW-008
+
+   Any agent can append a [security] block claiming approval; nothing authenticates its writer.
+
+.. threat:: Silent edits to threats and accepted risks
+   :id: THREAT-SDD-SKILLS-005
+   :status: open
+   :stride: T
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Append-only ids with supersedes; test against the base branch.
+   :links: REQ-SECURITY-REVIEW-009
+
+   Later reviews or the docs skill can delete a threat, flip its status or rewrite a risk rationale without trace.
+
+.. threat:: Threat marked mitigated without evidence
+   :id: THREAT-SDD-SKILLS-006
+   :status: open
+   :stride: T
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Mitigated needs file:line, test id and an orchestrator sabotage check, and is confirmed at the gate.
+   :links: REQ-SECURITY-REVIEW-004
+
+   The agent could set a threat to mitigated on its own claim, unseen by the operator.
+
+.. threat:: Secret values or exploit steps published
+   :id: THREAT-SDD-SKILLS-007
+   :status: open
+   :stride: I
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Secrets named by location only; redact-check before commit; no exploit steps; never post findings to GitHub.
+   :links: REQ-SECURITY-REVIEW-010
+
+   Reporting a found secret could copy its value into docs, bd notes or GitHub; open threats could publish exploit detail.
+
+.. threat:: Unbounded reset and fix loops
+   :id: THREAT-SDD-SKILLS-008
+   :status: open
+   :stride: D
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Incremental re-review; decided findings not re-raised; operator confirmation after 2 resets or 3 fix rounds.
+   :links: REQ-SECURITY-REVIEW-012
+
+   Each non-deterministic re-review can reword or add findings and neither loop has a limit.
+
+.. threat:: Opus spend and silent truncation
+   :id: THREAT-SDD-SKILLS-009
+   :status: open
+   :stride: D
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Exclusion list, size budget, unreviewed scope shown at the gate, token use recorded.
+   :links: REQ-SECURITY-REVIEW-011
+
+   Generated, binary, lock and vendored content inflates input, wasting spend and possibly exceeding context.
+
+.. threat:: Fix worker weakens what it fixes
+   :id: THREAT-SDD-SKILLS-010
+   :status: open
+   :stride: E
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Out paths limited to the finding's files plus one test; orchestrator verifies suites, scope and sabotage.
+   :links: REQ-SECURITY-REVIEW-005
+
+   The fix worker's brief comes from finding text; without scope limits it could weaken tests or edit security docs or skills.
+
+.. threat:: Untestable criteria let gates pass on paper
+   :id: THREAT-SDD-SKILLS-011
+   :status: open
+   :stride: T
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Recorded base sha, explicit trust boundaries, id mapping, noted status, SKILL.md diff as design input.
+   :links: REQ-SECURITY-REVIEW-011
+
+   No base commit, no trust-boundary list, an id format that breaks the needs regex, undefined 'note', and skill prompts never reviewed at design time.
+
+.. threat:: Malformed or invented references in findings
+   :id: THREAT-SDD-SKILLS-012
+   :status: open
+   :stride: R
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Validation helper before the gate; warnings as errors in the security docs.
+   :links: REQ-SECURITY-REVIEW-013
+
+   Unvalidated severity, STRIDE values, C4 ids or links enter published needs.

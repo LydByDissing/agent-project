@@ -15,7 +15,11 @@ ADR-005: Security review is LLM-led STRIDE + OWASP on Opus, with the operator de
    After implementation it checks the run's code against OWASP ASVS / Top 10
    concerns and verifies each threat's mitigation and test. Every finding
    goes to the operator, who chooses what happens. No severity triggers an
-   automatic reset. No scanners or dependency audits are run.
+   automatic reset. No scanners or dependency audits are run on the
+   reviewed code. The analysis runs in a read-only sub-agent; the main
+   context only runs gates and writes records (REQ-SECURITY-REVIEW-007). A
+   credential check on the review's own output (REQ-SECURITY-REVIEW-010) is
+   an output guard, not a code scanner, and is allowed.
 
    **Rationale**: STRIDE fits the C4 docs the pipeline already keeps. OWASP
    covers the code-level classes of flaw that matter for the kinds of

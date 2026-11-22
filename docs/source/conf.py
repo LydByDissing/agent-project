@@ -31,6 +31,8 @@ needs_fields = {
     "stride":       {**_str_field, "description": "Threat: STRIDE category (S, T, R, I, D, E)"},
     "mitigation":   {**_str_field, "description": "Threat: how it is mitigated, or why not"},
     "run":          {**_str_field, "description": "Risk: SDD run id in which the risk was accepted"},
+    "decided_by":   {**_str_field, "description": "Threat/Risk: who decided (must be 'operator')"},
+    "supersedes":   {**_str_field, "description": "Threat/Risk: id of the record this one replaces"},
 }
 
 needs_id_required = True
