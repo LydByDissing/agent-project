@@ -8,12 +8,15 @@ tested code without the user having to manage the steps.
 
 The user writes (or the `docs` skill helps write) a specification. Everything
 downstream is driven by that spec: planning, implementation, testing, and
-architecture review are all autonomous. The user touches three gates:
+architecture review are all autonomous. The user touches three gates and two security-review pauses:
 
 ```
-docs ──[approve docs]──► plan ──[approve plan]──► implement ──► arch-review ──[approve]──► done
- ▲                        │                           │               │
- └─────────── new requirement discovered (any phase resets here) ─────┘
+docs → security-design → plan → implement → arch-review → security-review → done
+
+docs ──[approve docs]──► security-design ──[operator gate]──► plan ──[approve plan]──►
+  implement ──► arch-review ──[approve]──► security-review ──[operator gate]──► done
+ ▲                                                                  │
+ └──────── new requirement discovered (any phase resets here) ──────┘
 ```
 
 If any phase discovers a requirement that isn't in the specification, the
@@ -30,10 +33,24 @@ complete.
 | `conductor` | sdd | Wave-based worker spawner, dependency ordering, synthesis |
 | `implement` | conductor | Coder, tester, and reviewer worker behavior |
 | `arch-review` | sdd | Test quality sensors, REQ coverage, C4 boundary, ADR compliance |
+| `security-review` | sdd | Threat analysis of the design and of the code, operator decisions, review records |
 
 `skills/rules/RULES.md`, `skills/rules/TESTING.md`, and
 `skills/rules/CODEGRAPH.md` are shared references read by the agent skills —
 not user-invokable.
+
+## Security review
+
+A security analyst agent (opus, read-only tools) reviews the pipeline twice:
+`security-design` after the docs are approved, and `security-review` after
+arch-review. Each findings list goes through an interactive operator gate, and
+those are the two operator pauses: the operator decides every finding (fix,
+accept risk, add a requirement, note) and no agent decides for them. Threats,
+accepted risks and review records live in `docs/source/security/` and are
+append-only; `scripts/security_gate.py check` verifies them before the run can
+move to `plan`, move to `done` or be closed. Paths changed after the design
+review that sit in the protected set (see `skills/rules/RULES.md`) need an
+explicit operator decision.
 
 ## Code intelligence
 
@@ -160,6 +177,7 @@ skills/
 ├── conductor/    SKILL.md        — wave-based worker orchestration
 ├── implement/    SKILL.md        — coder, tester, reviewer worker behavior
 ├── arch-review/  SKILL.md        — architecture and test quality review
+├── security-review/ SKILL.md     — security-design and post-implementation review
 │                 scripts/        — lint_tests.py (static test sensor)
 └── rules/        RULES.md        — DSL format, code style, model selection
                   TESTING.md      — test quality guide and anti-patterns

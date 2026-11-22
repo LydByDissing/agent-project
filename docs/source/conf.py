@@ -32,9 +32,39 @@ needs_fields = {
     "mitigation":   {**_str_field, "description": "Threat: how it is mitigated, or why not"},
     "run":          {**_str_field, "description": "Risk: SDD run id in which the risk was accepted"},
     "decided_by":   {**_str_field, "description": "Threat/Risk: who decided (must be 'operator')"},
+    "severity":     {**_str_field, "description": "Threat: severity (crit, high, med, low)"},
+    "decisions":    {**_str_field, "description": "Threat: append-only operator decision entries"},
     "supersedes":   {**_str_field, "description": "Threat/Risk: id of the record this one replaces"},
 }
 
 needs_id_required = True
 needs_id_regex = "^(FEAT|REQ|ADR|THREAT|RISK)-[A-Z0-9-]+"
 needs_default_layout = "clean"
+
+
+import logging
+
+
+class _SecurityWarnings(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.hits = []
+
+    def emit(self, record):
+        loc = str(getattr(record, "location", "") or "")
+        msg = record.getMessage()
+        if "security/" in loc or "security/" in msg or loc.startswith("security"):
+            self.hits.append(f"{loc}: {msg}")
+
+
+def setup(app):
+    from sphinx.errors import ExtensionError
+
+    h = _SecurityWarnings()
+    logging.getLogger("sphinx").addHandler(h)
+
+    def fail(app, exc):
+        if exc is None and h.hits:
+            raise ExtensionError("warnings in docs/source/security/**:\n" + "\n".join(h.hits))
+
+    app.connect("build-finished", fail)

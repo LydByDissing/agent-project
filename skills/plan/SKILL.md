@@ -8,7 +8,7 @@ description: >
   Not normally invoked directly.
 ---
 
-# [origin ref=llm-dsl-gu1y.13,llm-dsl-l3a,llm-dsl-0p1 req=REQ-OPERATOR-EDU-004,REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
+# [origin ref=llm-dsl-2zv1.13,llm-dsl-gu1y.13,llm-dsl-l3a,llm-dsl-0p1 req=REQ-OPERATOR-EDU-004,REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
 #   [intent]Planning skill prompts for SDD pipeline: validates docs, extracts requirements and C4 context, decomposes into tracer-bullet vertical slices driven by observable behavior with prefactor identification and file-overlap dependencies, tags exec jobs with learn topics and prepares matching lessons[/intent]
 # [/origin]
 
@@ -341,11 +341,22 @@ Task N — reviewer (full feature): review all coder output
   Depends on: all coder tasks
   Model: sonnet
 
+## Protected paths
+<every task whose [out] touches the protected set (RULES.md, 'Protected set'),
+ with the matching paths, e.g. "Task 3 — scripts/security_gate_lib.py";
+ or "none">
+
 ## Definition of Done
 <sentence>
 
 Shall I proceed?
 ```
+
+**Protected-set flag.** Before presenting, read the glob list from the
+`Protected set` section of `skills/rules/RULES.md` (never hard-code it) and
+compare every task's `[out]` paths against it. Flag each task that touches a
+protected path in the `Protected paths` section above, so the operator sees
+that the post security review will require an operator decision for it.
 
 **Stop. Do not continue until the user explicitly approves.**
 On requested changes, update the plan and re-present before proceeding.
@@ -357,13 +368,16 @@ On requested changes, update the plan and re-present before proceeding.
 Only run after explicit user approval.
 
 For each task, create a bd issue with a body containing the enriched DSL.
+Create every task issue with `--no-inherit-labels`, so tasks do not inherit the
+epic's `phase=`, `base=`, `reset-count=` or `run=` labels (the epic carries
+exactly one phase label; tasks carry only their own labels below).
 Every issue MUST carry `feat=FEAT_ID`, `run=RUN_ID`, `req=REQ-XXX` (or
 `req=REQ-XXX,REQ-YYY` for multi-req coder tasks) labels.
 
 ```bash
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 
-BD_CODER=$(bd create "Coder: <component> — <goal>" --silent \
+BD_CODER=$(bd create "Coder: <component> — <goal>" --silent --no-inherit-labels \
   --labels "feat=$FEAT_ID,run=$RUN_ID,req=REQ-XXX,phase=implement,agent=coder" \
   --acceptance "<acceptance criterion>" \
   --body-file - << 'DSL'
@@ -386,7 +400,7 @@ BD_CODER=$(bd create "Coder: <component> — <goal>" --silent \
 DSL
 )
 
-BD_TESTER=$(bd create "Tester: <component>" --silent \
+BD_TESTER=$(bd create "Tester: <component>" --silent --no-inherit-labels \
   --labels "feat=$FEAT_ID,run=$RUN_ID,req=REQ-XXX,phase=implement,agent=tester" \
   --acceptance "all tests pass" \
   --body-file - << 'DSL'
@@ -402,7 +416,7 @@ DSL
 )
 bd dep add $BD_TESTER $BD_CODER
 
-BD_REVIEWER=$(bd create "Reviewer: $FEAT_ID" --silent \
+BD_REVIEWER=$(bd create "Reviewer: $FEAT_ID" --silent --no-inherit-labels \
   --labels "feat=$FEAT_ID,run=$RUN_ID,phase=implement,agent=reviewer" \
   --acceptance "verdict: approve or request-changes" \
   --body-file - << 'DSL'
