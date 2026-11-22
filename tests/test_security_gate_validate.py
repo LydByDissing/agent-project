@@ -2,6 +2,7 @@
 #   [intent]Tests security_gate.py validate and security_gate_lib parsing against tmp-dir fixtures and the real repo docs.[/intent]
 # [/origin]
 
+import re
 import json
 import subprocess
 import sys
@@ -196,7 +197,8 @@ def test_real_repo_docs():
     r = subprocess.run([sys.executable, str(SCRIPT), "validate", "--feature", "FEAT-SECURITY-REVIEW"],
                        capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 0, r.stderr
-    assert "21 threats, 0 risks, 4 review records" in r.stdout
+    t, k, n = _repo_record_counts()
+    assert f"{t} threats, {k} risks, {n} review records" in r.stdout
     d = lib.load(ROOT / "docs/source")
     assert {"security_review", "sdd_orchestrator", "sdd_skills"} <= d["c4"]
     assert len(lib.feat_reqs(d, "FEAT-SECURITY-REVIEW")) == 13
@@ -208,3 +210,11 @@ def test_real_repo_finding_rules_fire():
     assert lib.validate_findings([f], d, "FEAT-SECURITY-REVIEW") == []
     f["links"] = ["REQ-OPERATOR-EDU-001"]
     assert len(lib.validate_findings([f], d, "FEAT-SECURITY-REVIEW")) == 1
+
+def _repo_record_counts():
+    sec = Path(__file__).resolve().parent.parent / "docs/source/security"
+    threats = sum(len(re.findall(r"^\.\. threat::", f.read_text(), re.M)) for f in (sec / "threat-model").glob("*.rst"))
+    risks = len(re.findall(r"^\.\. risk::", (sec / "accepted-risks.rst").read_text(), re.M))
+    rows = len(re.findall(r"^   \* - [0-9a-f]{8}\s*$", (sec / "reviews.rst").read_text(), re.M))
+    return threats, risks, rows
+

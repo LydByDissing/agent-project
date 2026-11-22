@@ -2,6 +2,7 @@
 #   [intent]Audits security_gate.py validate with failing and passing controls for every finding rule, record rule, CLI exit code and findings file shape.[/intent]
 # [/origin]
 
+import re
 import json
 import subprocess
 import sys
@@ -107,7 +108,8 @@ def test_real_repo_reports_exact_counts_and_exits_zero():
                        capture_output=True, text=True, cwd=ROOT)
 
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "feature FEAT-SECURITY-REVIEW: 21 threats, 0 risks, 4 review records"
+    t, k, n = _repo_record_counts()
+    assert r.stdout.strip() == f"feature FEAT-SECURITY-REVIEW: {t} threats, {k} risks, {n} review records"
     assert r.stderr == ""
 
 
@@ -512,3 +514,11 @@ def test_threat_or_mitigation_over_400_chars_is_rejected(tmp_path):
     ok.write_text(json.dumps([dict(base, threat="x" * 400, mitigation="y" * 400)]))
     r = subprocess.run([sys.executable, str(root / "scripts/security_gate.py"), "validate", "--feature", "FEAT-SECURITY-REVIEW", "--findings", str(ok)], capture_output=True, text=True, cwd=root)
     assert r.returncode == 0, r.stderr
+
+def _repo_record_counts():
+    sec = Path(__file__).resolve().parent.parent / "docs/source/security"
+    threats = sum(len(re.findall(r"^\.\. threat::", f.read_text(), re.M)) for f in (sec / "threat-model").glob("*.rst"))
+    risks = len(re.findall(r"^\.\. risk::", (sec / "accepted-risks.rst").read_text(), re.M))
+    rows = len(re.findall(r"^   \* - [0-9a-f]{8}\s*$", (sec / "reviews.rst").read_text(), re.M))
+    return threats, risks, rows
+
