@@ -25,9 +25,9 @@ Security Review — Design-Time and Post-Implementation
    learn server accepted cross-site requests that could start paid
    ``claude -p`` runs. A design-time review would have caught this in the
    spec. The first manual design-time review of this feature (run 87708f1a)
-   found 12 threats in its own design, and the re-review after reset 1 found
-   10 more gaps; they are THREAT-SDD-SKILLS-001..014 and each is mitigated
-   by requirements below.
+   found 12 threats in its own design, and two re-reviews found 17 more
+   gaps; they are THREAT-SDD-SKILLS-001..017 and each is mitigated by
+   requirements below or recorded as noted.
 
 Requirements
 ------------
@@ -204,10 +204,16 @@ Requirements
        refused and the gate re-runs. If the epic is found closed while the
        post-implementation check fails, it is reopened. RULES.md defines a
        protected set: ``docs/source/security/**``, ``skills/**``,
-       ``.claude/**``, ``agents/**``, ``scripts/security_gate.py`` and its
-       tests, the append-only test, and ``docs/source/conf.py``. Any change
-       to the protected set during a run is shown at the post-implementation
-       gate as a finding the operator must decide. ``skills/rules/RULES.md`` gains a ``security`` row (opus) in
+       ``.claude/**``, ``.claude-plugin/**``, ``agents/**``, ``hooks/**``,
+       ``mcp-servers.json``, ``scripts/security_gate.py``, every module it
+       imports and its tests, the append-only test, ``tests/conftest.py``,
+       any pytest configuration (``pyproject.toml``, ``pytest.ini``,
+       ``setup.cfg``, ``tox.ini``), and ``docs/source/conf.py``. The plan
+       gate flags every implement task whose ``[out]`` touches the protected
+       set so the operator sees it before work starts. Any change to the
+       protected set during a run must carry an operator decision at the
+       post-implementation gate, enforced by the check
+       (REQ-SECURITY-REVIEW-008). ``skills/rules/RULES.md`` gains a ``security`` row (opus) in
        Model Selection and the ``[security]`` result format.
        ``skills/security-review/SKILL.md`` exists. The README pipeline
        diagram shows both phases. The plugin version is bumped.
@@ -264,12 +270,18 @@ Requirements
        threat-model RST with ``status=open``, and the review adds a record to
        ``docs/source/security/reviews.rst``: run id, stage, reviewed range
        (base..head sha) and a sha256 of the reviewed ``docs/source`` and
-       ``skills`` tree. A Python helper (``scripts/security_gate.py check
+       ``skills`` tree, excluding ``docs/source/security/**`` (covered by
+       the append-only test instead). A Python helper (``scripts/security_gate.py check
        --feature FEAT-XXX --stage design|post``) exits non-zero, naming the
        cause, if: no review record exists for this run and stage; the
        current tree hash differs from the record's; or a threat linked to the
        feature is still ``open`` without a decision for this run (design) or
-       is ``open`` at all (post). The phase cannot advance while it fails.
+       is ``open`` at all (post). At the post stage it also fails if the
+       record's head is not HEAD and ``git diff <head>..HEAD`` touches
+       anything outside ``docs/source/security/**``, and if any path in the
+       protected set changed between the base and HEAD without being listed
+       in this run's post review record with an operator decision. The phase
+       cannot advance while it fails.
        When HEAD changes ``scripts/security_gate.py``, the orchestrator runs
        the version from the base commit. Decisions are collected only
        through the interactive question tool, asked after the findings are
@@ -302,8 +314,10 @@ Requirements
    :acceptance: Given a change to ``docs/source/security/**``, then a test
        compares THREAT and RISK records with the epic's base commit and fails
        if an id has disappeared, a RISK's rationale changed, a decision
-       entry was removed or altered, or a THREAT's status changed without a
-       decision for the current run. Replacing a record means adding a new
+       entry was removed or altered, a THREAT's status changed without a
+       decision for the current run, or a review record in ``reviews.rst``
+       was removed or altered, or a run + stage + review number appears more
+       than once. Replacing a record means adding a new
        need with ``:supersedes:`` pointing at the old id; the old one stays.
        A superseding record inherits the old record's status and links
        unless an operator decision for this run is recorded on it; its
@@ -357,11 +371,16 @@ Requirements
        Opus spend and can silently exceed the context. "Since the run
        started" needs a fixed reference (THREAT-SDD-SKILLS-009,
        THREAT-SDD-SKILLS-011).
-   :acceptance: Given a new epic, then the orchestrator records
-       ``base=<sha>`` on it at creation, and resets do not change it.
-       ``security_gate.py`` fails unless the epic has exactly one ``base=``
-       label, that sha is an ancestor of HEAD, and it equals
-       ``git merge-base <main> HEAD``. Review
+   :acceptance: Given a new epic, then the orchestrator proposes the fork
+       point (HEAD at creation, which on a stacked branch is not the
+       merge-base with main) and the operator confirms it. The base is stored
+       in the run's first committed review record in ``reviews.rst``
+       (append-only), and ``base=<sha>`` on the epic only mirrors it. Resets
+       do not change it. ``security_gate.py`` fails unless the epic has
+       exactly one ``base=`` label equal to the recorded base, the base is an
+       ancestor of HEAD, and ``git merge-base <main> HEAD`` is an ancestor of
+       the base (or equal to it). After a rebase the base may be re-recorded
+       only through an operator decision entry. Review
        input excludes generated, binary, lockfile and vendored paths (default
        list in RULES.md, extendable per project) and has a size budget. If
        the in-scope input exceeds the budget, the excluded part is listed at

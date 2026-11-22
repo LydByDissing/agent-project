@@ -3,9 +3,9 @@ SDD Skills — Threat Model
 
 Container: ``sdd_skills``. Threats recorded by the design-time security
 review of FEAT-SECURITY-REVIEW (run 87708f1a, 2026-11-22): 001..012 from the
-first review, 013..014 from the re-review after reset 1. The operator chose
-"add requirement" for all of them, so each stays ``open`` until the linked
-requirements are implemented and verified.
+first review, 013..014 from review 2, 015..017 from review 3. 001..014 are
+``open`` until the linked requirements are implemented and verified;
+015..017 are ``noted`` by the operator and handled during implementation.
 
 Trust boundaries
 ----------------
@@ -162,4 +162,46 @@ Threats
 
    Any agent can move or duplicate the ``base=`` label and so empty the review
    diff; the "last review" anchor for incremental re-reviews was undefined.
+
+.. threat:: Gate script unverified on first run
+   :id: THREAT-SDD-SKILLS-015
+   :status: noted
+   :stride: T
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Implementation: if the script is absent at the base, show a mandatory "gate script unverified (bootstrap)" finding at both gates; otherwise run the base version from a throwaway worktree with python -I.
+   :links: REQ-SECURITY-REVIEW-008
+
+   Running the gate script "from the base commit" is meaningless when it did
+   not exist there, as in run 87708f1a, and a base copy run from the HEAD tree
+   still imports HEAD modules and config. Noted 2026-11-22 (review 3, SD3-04).
+
+.. threat:: Non-interactive session not defined
+   :id: THREAT-SDD-SKILLS-016
+   :status: noted
+   :stride: D
+   :c4_scope: sdd_orchestrator
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Implementation: treat a missing or failing question tool as non-interactive; document the two gate pauses in the sdd SKILL.md and README with a doc-contract test.
+   :links: REQ-SECURITY-REVIEW-008
+
+   The requirement to refuse non-interactive sessions does not say how one is
+   detected; auto, bypass or headless modes may lack or auto-answer the
+   question tool. Noted 2026-11-22 (review 3, SD3-06).
+
+.. threat:: Process threats do not fit sabotage evidence
+   :id: THREAT-SDD-SKILLS-017
+   :status: noted
+   :stride: R
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Implementation: accept a doc-contract or behaviour test plus a sabotage patch for process threats, or operator confirmation of "mitigated by requirement".
+   :links: REQ-SECURITY-REVIEW-004, REQ-SECURITY-REVIEW-005
+
+   Loop caps, budgets and untestable-criteria threats cannot be shown by
+   "disable the mitigation and a test fails", which invites marking them noted
+   instead of mitigated. Noted 2026-11-22 (review 3, SD3-07).
 

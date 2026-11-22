@@ -119,3 +119,35 @@ Decisions
 - Policy for review 3 in this run: crit/high reset to docs; med/low are
   recorded as noted.
 
+Design-Time Security Gate (review 3, reset 3)
+---------------------------------------------
+
+**Agent**: Ran review 3 (incremental, Opus, read-only). 7 threats adequately
+covered and 7 partly. Seven findings: implement workers can forge the gate's
+RST inputs (SD3-01, high); the merge-base rule for the base breaks on stacked
+branches, this run included (SD3-02, high); the hash covers its own record
+and the post check is not bound to code (SD3-03); the gate script is absent at
+the base on the first run (SD3-04); the protected set misses hooks, plugin
+config, MCP config and pytest config (SD3-05); non-interactive detection is
+undefined (SD3-06); process threats do not fit sabotage evidence (SD3-07).
+
+**User**: Yes, reset 3. Fold SD3-03 and SD3-05 into the same pass and note
+the rest. Then a short check of the SD3-01/02 edits, and on to plan.
+
+Decisions
+~~~~~~~~~
+
+- Reset to docs (``reset-count=3``); the operator confirmed going past the
+  REQ-012 limit again.
+- REQ-006: wider protected set; the plan gate flags implement tasks that
+  touch it; changes to it need an operator decision enforced by the check.
+- REQ-008: hash excludes the security docs; the post check is bound to HEAD
+  and to protected-set changes since the base.
+- REQ-009: append-only covers review records.
+- REQ-011: the base is the operator-confirmed fork point stored in the first
+  review record; the label mirrors it; main's merge-base must be an
+  ancestor of the base; re-recording after a rebase needs an operator
+  decision. This run's base is ``a429fd8``.
+- Noted: THREAT-SDD-SKILLS-015 (bootstrap gate script), -016
+  (non-interactive detection), -017 (process-threat evidence).
+
