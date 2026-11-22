@@ -177,7 +177,12 @@ def test_readme_pipeline_and_security_section():
 
 
 def test_plugin_version_bumped():
-    assert json.loads(rd(".claude-plugin", "plugin.json"))["version"] == "2.3.4"
+    r = subprocess.run(["git", "show", "main:.claude-plugin/plugin.json"], capture_output=True, text=True, cwd=ROOT)
+    if r.returncode != 0:
+        pytest.skip("main ref not available")
+    ver = lambda v: tuple(int(x) for x in v.split("."))
+    cur = json.loads(rd(".claude-plugin", "plugin.json"))["version"]
+    assert ver(cur) > ver(json.loads(r.stdout)["version"])
 
 
 def test_conf_has_threat_fields():
