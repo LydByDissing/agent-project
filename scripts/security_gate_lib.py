@@ -1,12 +1,14 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
 #   [intent]Parses threat, risk and review records and feature needs from the docs tree and validates analysis findings against them.[/intent]
 #   [inv]validate_findings returns one message per violated rule naming the finding id; it never raises on malformed finding fields.[/inv]
+#   [inv]redact_scan returns one message per likely credential naming file:line and type and never contains more than the first 4 characters of a match.[/inv]
 #   [inv]run_check returns an empty error list only when every REQ-008/011 rule holds; each failed rule adds a message naming its cause.[/inv]
 # [/origin]
 
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -615,3 +617,79 @@ def run_append_only(repo: Path, run: str, since: list[str]) -> list[str]:
         errs += append_only_errs(sec_records(repo, c), new, run, c)
     errs += head_errs(new, run)
     return list(dict.fromkeys(errs))
+
+
+KEY_PATS = (
+    ("aws-access-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
+    ("slack-token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),
+    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}")),
+    ("stripe-key", re.compile(r"\b[sr]k_live_[0-9A-Za-z]{10,}")),
+    ("anthropic-key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{10,}")),
+    ("private-key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----")),
+)
+TOKEN = re.compile(r"[A-Za-z0-9_+=-]{32,}")
+HEX = re.compile(r"[0-9a-f]+")
+SHA_CTX = re.compile(r"sha256|sdd-source-sha256|\bbase=|\b(?:tree|base|range|head|commit)\b\s*[:=]", re.I)
+ENT_MIN = 4.2
+HEX_ENT_MIN = 3.0
+SKIP_EXT = (".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".woff", ".woff2", ".zip", ".gz", ".pyc")
+
+
+def mask(v: str) -> str:
+    return v[:4] + "*" * min(len(v) - 4, 8)
+
+
+def entropy(t: str) -> float:
+    return -sum(c / len(t) * math.log2(c / len(t)) for c in (t.count(x) for x in set(t)))
+
+
+def tok_kind(t: str, sha_ok: bool) -> str:
+    if HEX.fullmatch(t):
+        return "" if sha_ok and len(t) in (40, 64) else ("high-entropy-hex" if entropy(t) >= HEX_ENT_MIN else "")
+    seg = [x for x in re.split(r"[-_]", t) if x]
+    if len(seg) > 2 and sum(x.isalpha() or x.isdigit() for x in seg) * 10 >= len(seg) * 6:
+        return ""
+    mixed = any(c.isdigit() for c in t) and any(c.isalpha() for c in t)
+    return "high-entropy-token" if mixed and entropy(t) >= ENT_MIN else ""
+
+
+def redact_text(text: str, name: str, sha_file: bool = False) -> list[str]:
+    out: list[str] = []
+    for ln, raw in enumerate(text.splitlines(), 1):
+        hits = [(m.start(), k, m.group(0)) for k, r in KEY_PATS for m in r.finditer(raw)]
+        spans = [(m.start(), m.end()) for _, _, v in hits for m in [re.search(re.escape(v), raw)] if m]
+        sha_ok = sha_file or bool(SHA_CTX.search(raw))
+        for m in TOKEN.finditer(raw):
+            if any(a <= m.start() < b for a, b in spans):
+                continue
+            k = tok_kind(m.group(0), sha_ok)
+            if k:
+                hits.append((m.start(), k, m.group(0)))
+        out += [f"{name}:{ln}: {k} {mask(v)}" for _, k, v in sorted(hits)]
+    return out
+
+
+def redact_scan(paths: list[Path], root: Path) -> list[str]:
+    out: list[str] = []
+    for p in paths:
+        try:
+            txt = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            out.append(f"{p}: unreadable: {e.strerror}")
+            continue
+        out += redact_text(txt, str(p), p.name == "reviews.rst")
+    return out
+
+
+def redact_paths(repo: Path, paths: list[str], feat: str, run: str) -> list[Path]:
+    if paths:
+        roots = [Path(x) if Path(x).is_absolute() else repo / x for x in paths]
+    else:
+        roots = [repo / "docs/source/security"]
+        if feat and run:
+            roots += sorted((repo / "docs/source/design_log").glob(f"{log_name(feat, run)}*.rst"))
+    out: list[Path] = []
+    for r in roots:
+        out += sorted(x for x in r.rglob("*") if x.is_file() and x.suffix not in SKIP_EXT) if r.is_dir() else [r]
+    return out

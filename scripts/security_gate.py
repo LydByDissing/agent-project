@@ -1,5 +1,5 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009 c4=sdd_skills/security_review]
-#   [intent]Command line entry for the security gate script; validate checks records and findings, check gates a phase move on the review record, base, tree hash and protected-set rules, append-only fails when security records were removed or altered since given commits.[/intent]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
+#   [intent]Command line entry for the security gate script; validate checks records and findings, check gates a phase move on the review record, base, tree hash and protected-set rules, append-only fails when security records were removed or altered since given commits, redact-check fails on likely credentials in security outputs without echoing them.[/intent]
 # [/origin]
 
 import argparse
@@ -69,6 +69,16 @@ def cmd_append_only(a) -> int:
     return 1 if errs else 0
 
 
+def cmd_redact(a) -> int:
+    repo = Path(a.repo).resolve()
+    files = lib.redact_paths(repo, a.paths or [], a.feature or "", a.run or "") + [Path(x) for x in a.text_file or []]
+    errs = lib.redact_scan(files, repo)
+    print(f"redact-check {len(files)} files: {'FAIL' if errs else 'ok'}")
+    for e in errs:
+        print(f"ERROR {e}", file=sys.stderr)
+    return 1 if errs else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="security_gate")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -96,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--since")
     o.add_argument("--repo", default=str(DOCS.parent.parent))
     o.set_defaults(fn=cmd_append_only)
+    r = sub.add_parser("redact-check")
+    r.add_argument("--paths", nargs="+")
+    r.add_argument("--text-file", nargs="+")
+    r.add_argument("--feature")
+    r.add_argument("--run")
+    r.add_argument("--repo", default=str(DOCS.parent.parent))
+    r.set_defaults(fn=cmd_redact)
     a = p.parse_args(argv)
     return a.fn(a)
 
