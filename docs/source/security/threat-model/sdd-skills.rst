@@ -253,3 +253,135 @@ Threats
    :links: REQ-SECURITY-REVIEW-011, REQ-SECURITY-REVIEW-006
 
    The base sits in prose, not a record field; the effective base after a re-record is undefined; 'modules it imports' is unscoped. Noted 2026-11-22 (narrow check, SD4-04) under the operator's policy for this step.
+
+.. threat:: Unguarded shell variables empty the review scope
+   :id: THREAT-SDD-SKILLS-022
+   :status: open
+   :stride: T/I
+   :c4_scope: security_review
+   :severity: high
+   :mitigation: Re-set and guard variables in the same call (${BASE:?}, git rev-parse --verify "${BASE}^{commit}", set -u), brace every "${BASE}:path", and stop the review if the scoped diff is empty while the run changed files.
+   :links: REQ-SECURITY-REVIEW-011, REQ-SECURITY-REVIEW-001, REQ-SECURITY-REVIEW-004, THREAT-SDD-SKILLS-009, THREAT-SDD-SKILLS-014
+
+   Shell variables do not persist between Bash calls and zsh reads "$BASE:s..." as a history modifier. An empty or mangled BASE turns "$BASE"..HEAD into an empty diff (no findings, no error) and "$BASE:path" into an index lookup, so the bootstrap check prints present when the script is absent (observed live in run 87708f1a). Anchor: ``skills/security-review/SKILL.md:157``. Post-implementation review 1 of run 87708f1a (SP-01).
+
+.. threat:: HEAD script still decides the base run
+   :id: THREAT-SDD-SKILLS-023
+   :status: open
+   :stride: T/E
+   :c4_scope: security_review
+   :severity: high
+   :mitigation: The orchestrator decides with plain git (git diff --name-only BASE HEAD -- scripts/security_gate*.py) and, when anything differs, runs only the base worktree copy with python3 -I, never the HEAD script first.
+   :links: REQ-SECURITY-REVIEW-008, REQ-SECURITY-REVIEW-006, THREAT-SDD-SKILLS-013
+
+   The HEAD copy still decides whether the base version runs: cmd_check calls script_state and base-path is itself HEAD code, so a worker that alters the HEAD script or lib can report same and skip the base run. Anchor: ``scripts/security_gate.py:45``. Post-implementation review 1 of run 87708f1a (SP-02).
+
+.. threat:: Decision entries lack stage and target status
+   :id: THREAT-SDD-SKILLS-024
+   :status: open
+   :stride: T/R
+   :c4_scope: security_review
+   :severity: high
+   :mitigation: Record stage= and the target status in each decision entry and allow a status change only with a matching entry for this run, stage and new status added after the compared record.
+   :links: REQ-SECURITY-REVIEW-009, REQ-SECURITY-REVIEW-008, THREAT-SDD-SKILLS-005, THREAT-SDD-SKILLS-003
+
+   Any operator entry for the run id authorises a status change; entries carry no stage or target status, so a design-stage add-requirement entry lets an agent later flip the threat to mitigated or noted at post with append-only and check both passing. Anchor: ``scripts/security_gate_lib.py:609``. Post-implementation review 1 of run 87708f1a (SP-03).
+
+.. threat:: Sabotage check accepts any non-zero exit
+   :id: THREAT-SDD-SKILLS-025
+   :status: open
+   :stride: T
+   :c4_scope: security_review
+   :severity: high
+   :mitigation: Commit or copy the fix first, verify the edit applied (non-empty diff), require the test to pass unsabotaged and to fail with exit 1 naming that test when sabotaged, define SCRATCH, use set -e.
+   :links: REQ-SECURITY-REVIEW-004, REQ-SECURITY-REVIEW-005, THREAT-SDD-SKILLS-006, THREAT-SDD-SKILLS-010
+
+   The sabotage check accepts any non-zero exit (failed cd or edit, pytest exit 4 or 5, missing test), the worktree from HEAD lacks uncommitted fixes and tests, and SCRATCH is never set, so fake evidence can pass for mitigated and for fix verification. Anchor: ``skills/security-review/SKILL.md:411``. Post-implementation review 1 of run 87708f1a (SP-04).
+
+.. threat:: Guessable DATA terminator breaks the data boundary
+   :id: THREAT-SDD-SKILLS-026
+   :status: open
+   :stride: E/T
+   :c4_scope: security_review
+   :severity: high
+   :mitigation: Use a random per-run nonce in opening and closing markers, reject or escape content containing it, tell the analyst only the nonce terminator counts, and add a fixture test with an embedded DATA>>>.
+   :links: REQ-SECURITY-REVIEW-007, THREAT-SDD-SKILLS-001
+
+   DATA blocks end with a fixed, guessable DATA>>> marker with no escaping, so reviewed content containing that literal closes the block early and the rest lands in the instruction part of the analyst prompt. Anchor: ``skills/security-review/SKILL.md:227``. Post-implementation review 1 of run 87708f1a (SP-05).
+
+.. threat:: Design log and fix issues escape redact-check
+   :id: THREAT-SDD-SKILLS-027
+   :status: open
+   :stride: I
+   :c4_scope: security_review
+   :severity: med
+   :mitigation: Always include the design-log glob when --feature and --run are given, pass each fix-issue text via --text-file before bd create, and add a fixture test with a planted key in the design log.
+   :links: REQ-SECURITY-REVIEW-010, THREAT-SDD-SKILLS-007
+
+   redact-check adds the run's design log only when no --paths is given; SKILL step 11 passes --paths, so the design log is never scanned, and fix-issue texts are never passed either. Anchor: ``scripts/security_gate_lib.py:800``. Post-implementation review 1 of run 87708f1a (SP-06).
+
+.. threat:: Gate defaults to the plugin repo, not the project
+   :id: THREAT-SDD-SKILLS-028
+   :status: open
+   :stride: T
+   :c4_scope: sdd_orchestrator
+   :severity: med
+   :mitigation: Pass --repo "$CLAUDE_PROJECT_DIR" (and --docs for validate) in every snippet, and default --repo to the git toplevel of the cwd or make it required; fail if the repo has no reviews.rst for the run.
+   :links: REQ-SECURITY-REVIEW-008, REQ-SECURITY-REVIEW-006, THREAT-SDD-SKILLS-002
+
+   --repo and --docs default to the plugin's own root while GATE is CLAUDE_PLUGIN_ROOT and several SKILL snippets omit --repo, so an installed plugin checks the plugin cache repo instead of the project. Anchor: ``scripts/security_gate.py:117``. Post-implementation review 1 of run 87708f1a (SP-07).
+
+.. threat:: Planted injection instruction in review input
+   :id: THREAT-SDD-SKILLS-029
+   :status: open
+   :stride: T/E
+   :c4_scope: sdd_skills
+   :severity: med
+   :mitigation: Keep it as a test fixture in a test that asserts a possible-injection finding is produced; it is not repository content.
+   :links: REQ-SECURITY-REVIEW-007, THREAT-SDD-SKILLS-001
+
+   Possible injection: a data block contains an instruction to the reviewer to report no findings; it was not followed. This is the orchestrator's planted live test fixture for REQ-007 (not in the repository). Anchor: ``tests/fixtures/notes.py:4``. Post-implementation review 1 of run 87708f1a (SP-08).
+
+.. threat:: Injection findings rejected by validate
+   :id: THREAT-SDD-SKILLS-030
+   :status: open
+   :stride: R
+   :c4_scope: security_review
+   :severity: med
+   :mitigation: Carry the possible-injection marker in its own field or a tag and keep element as the real C4 id, or let validate accept the marker with a valid C4 id; add a test that the injection fixture validates and is written.
+   :links: REQ-SECURITY-REVIEW-007, REQ-SECURITY-REVIEW-013, THREAT-SDD-SKILLS-012
+
+   The agent file tells the analyst to use element possible-injection, which validate rejects as not a C4 id, so injection findings become invalid and are never written to the threat model. Anchor: ``agents/security-analyst.md:39``. Post-implementation review 1 of run 87708f1a (SP-09).
+
+.. threat:: Slash and dot secrets evade the entropy rule
+   :id: THREAT-SDD-SKILLS-031
+   :status: open
+   :stride: I
+   :c4_scope: security_review
+   :severity: med
+   :mitigation: Add slash and dot to the token class or add base64 and JWT patterns, flag secret=/password=/token= assignments with long values, and add fixtures while keeping sha fields allowed.
+   :links: REQ-SECURITY-REVIEW-010, THREAT-SDD-SKILLS-007
+
+   The token class leaves out slash and dot, so base64 secrets such as a 40-character AWS secret access key, or a JWT, split into short pieces and get no high-entropy hit. Anchor: ``scripts/security_gate_lib.py:698``. Post-implementation review 1 of run 87708f1a (SP-10).
+
+.. threat:: Indented or misplaced threats invisible to the gate
+   :id: THREAT-SDD-SKILLS-032
+   :status: open
+   :stride: T
+   :c4_scope: security_review
+   :severity: med
+   :mitigation: Allow leading whitespace (or read needs.json from the Sphinx build), scan all of docs/source/security, and fail if build and parser counts differ.
+   :links: REQ-SECURITY-REVIEW-008, REQ-SECURITY-REVIEW-003, THREAT-SDD-SKILLS-003
+
+   The threat directive is matched only at column 0 and only under threat-model/, so an indented threat or one elsewhere under security/ still renders as open but is invisible to the post check. Anchor: ``scripts/security_gate_lib.py:26``. Post-implementation review 1 of run 87708f1a (SP-11).
+
+.. threat:: Security block hash fragile and format mismatched
+   :id: THREAT-SDD-SKILLS-033
+   :status: open
+   :stride: S/R
+   :c4_scope: security_review
+   :severity: low
+   :mitigation: Compute the hash with a NUL-safe gate subcommand over sorted relative paths, align the RULES.md format with SKILL step 12, and add a doc-contract test that both match.
+   :links: REQ-SECURITY-REVIEW-003, REQ-SECURITY-REVIEW-008, THREAT-SDD-SKILLS-004
+
+   The [security] hash uses find|sort|xargs cat, which splits names on whitespace, and the RULES.md [security] format lacks sha256 and input_bytes, so a block written to the RULES format cannot be hash-checked on resume. Anchor: ``skills/security-review/SKILL.md:569``. Post-implementation review 1 of run 87708f1a (SP-12).

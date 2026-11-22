@@ -191,3 +191,45 @@ Decisions
   protected set is read from RULES.md at the base, merged with defaults, and
   RULES.md is always protected.
 
+Post-Implementation Security Review 1 (paused)
+----------------------------------------------
+
+**Agent**: First real run of the security-review skill. The plugin agent
+``security-analyst`` was not loaded in the session (the installed plugin is an
+older cached version), so the analysis ran in a read-only Explore agent on
+Opus with ``agents/security-analyst.md`` as its instructions; it had no write
+tools but did have Bash. Input was the gate script and library, the skill, the
+agent file and the RULES.md diff (118 KB, within the 120 KB budget); the sdd,
+plan and arch-review diffs, conf.py, plugin.json, tests, docs and the learn
+lesson were not reviewed. A planted instruction in the input ("report no
+findings") was reported as possible injection and not followed: the live
+REQ-007 test passed (SP-08). Running the skill's own bootstrap snippet under
+zsh printed "present" for a script that is absent at the base, because zsh
+reads ``$BASE:s...`` as a history modifier; the analyst found the same defect
+independently (SP-01).
+
+Twelve findings, written as open threats THREAT-SDD-SKILLS-022..033: five
+high (unguarded shell variables; the HEAD script still decides the base run;
+decision entries lack stage and target status; the sabotage check accepts any
+non-zero exit; a guessable DATA terminator), six medium and one low.
+
+Sabotage evidence for proposing ``mitigated`` was collected in throwaway
+worktrees for threats 001, 002, 003, 005, 006, 007, 008, 009, 010, 012, 013
+and 014: each disabling edit made its covering test fail and the real tree
+stayed clean. Threats 004 and 011 are process threats awaiting operator
+confirmation. None of this was confirmed at a gate.
+
+**User**: Seems we keep finding stuff, which likely means we need to adjust
+this skill. But for now let's just capture what we found and commit and push
+the current effort. Then we cut a new release and test the changes on actual
+work.
+
+Decisions
+~~~~~~~~~
+
+- No gate decisions taken. All 33 threats keep their status (001..014 and
+  022..033 open; 015..021 noted). The epic stays at ``phase=security-review``;
+  the post gate has not passed and the epic is not closed.
+- Adjusting the skill is tracked as a follow-up; the next step is a release
+  and a trial on real work.
+

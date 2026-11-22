@@ -65,4 +65,13 @@ FEAT-OPERATOR-EDU, so not the merge-base with main).
      - -
      - 4 (SD4-01..04)
      - SD3-02 closed; all four noted per policy; planning may proceed
+   * - 87708f1a
+     - post
+     - 1
+     - a429fd8
+     - 24fc00a..5de0b95
+     - b9f925e6970ecdbba5cbbcad53e3396bf2f40740b5a26824a060b1207ff44501
+     - -
+     - 12 (SP-01..12, THREAT-SDD-SKILLS-022..033)
+     - paused by operator before decisions; all findings open; mitigated evidence collected for 001-003, 005-010, 012-014 but not confirmed; not reviewed: sdd/plan/arch-review diffs, conf.py, plugin.json, tests, docs, learn
 
