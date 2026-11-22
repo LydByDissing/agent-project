@@ -547,6 +547,8 @@ def append_only_errs(old: dict, new: dict, run: str, since: str) -> list[str]:
         if n is None:
             errs.append(f"{o['type']} {nid} disappeared {tag}")
             continue
+        if o["file"] != n["file"]:
+            errs.append(f"{o['type']} {nid} moved from {Path(o['file']).relative_to(SECURITY_REL)} to {Path(n['file']).relative_to(SECURITY_REL)} {tag}")
         if o["type"] == "risk" and o["opts"].get("rationale", "") != n["opts"].get("rationale", ""):
             errs.append(f"risk {nid} rationale changed {tag}")
         have = decision_entries(n)
@@ -574,6 +576,8 @@ def head_errs(new: dict, run: str) -> list[str]:
     needs = new["needs"]
     succ: dict[str, list[str]] = {}
     for nid, n in needs.items():
+        if n["type"] == "threat" and not re.fullmatch(rf"THREAT-{re.escape(container_of(n['file']))}-\d{{3}}", nid):
+            errs.append(f"threat {nid} id does not match container {container_of(n['file'])} of {Path(n['file']).relative_to(SECURITY_REL)}")
         tgt = n["opts"].get("supersedes", "").strip()
         if not tgt:
             continue

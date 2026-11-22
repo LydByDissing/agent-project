@@ -163,7 +163,6 @@ def test_threat_id_case_change_is_detected(repo):
     fails(repo, b, "THREAT-MY-BOX-001", "disappeared")
 
 
-@pytest.mark.xfail(strict=True, reason="append-only keys records by id only; moving THREAT-MY-BOX-001 into another container's file passes")
 def test_threat_moved_to_other_container_file_is_detected(repo):
     b = commit(repo)
     put(repo, TM, tm(threat(2, "noted", dec())))
