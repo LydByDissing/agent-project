@@ -351,7 +351,10 @@ If `s=ok`:
 If `s=partial` or `s=fail`:
 - Report blocked issues to user
 - Ask user: fix and re-run, or reset to plan?
-- Act accordingly
+- Fix and re-run: stay at `phase=implement` and re-invoke the conductor.
+- Reset to plan: `bd label remove $EPIC_ID phase=implement`, then run the
+  security gate check (`--stage design`), then `bd label add $EPIC_ID phase=plan`
+  and re-run the plan phase.
 
 ---
 
@@ -478,9 +481,12 @@ For stalled conductor runs:
 bd list --label "run=$RUN_ID" --status open
 ```
 
-Before resuming, run the security gate check live again (`--stage design` when
-`phase=security-design` or earlier, `--stage post` from `phase=security-review`
-on) and never skip it because an earlier run passed. If the epic is closed but
+Before resuming, run the security gate check live again: `--stage design` when
+the epic is at `phase=plan`, `phase=implement` or `phase=arch-review` (the
+design gate must have passed for any of them), `--stage post` at
+`phase=security-review` or `phase=done`. At `phase=docs` or
+`phase=security-design` no gate has passed yet, so run the security-design
+phase rather than a check, and never skip it because an earlier run passed. If the epic is closed but
 the post check fails, reopen it and set `phase=security-review`.
 
 Re-invoke from the implement phase — the conductor will re-read open issues

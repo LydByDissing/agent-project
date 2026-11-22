@@ -65,6 +65,8 @@ glob per backticked token, nothing else in this section may use backticks.
 
 - `scripts/security_gate_lib.py`
 - `scripts/security_gate.py`
+- `tests/test_security_gate*.py`
+- `tests/test_*append_only*.py`
 - `hooks/**`
 - `.claude-plugin/**`
 - `mcp-servers.json`
