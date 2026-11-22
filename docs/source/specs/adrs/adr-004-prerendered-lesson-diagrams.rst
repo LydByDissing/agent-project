@@ -18,7 +18,10 @@ ADR-004: Lesson diagrams are committed as source plus pre-rendered SVG
 
    **Consequences**: Generation needs the renderer installed (PlantUML is
    already resolved by the docs skill's ``generate_diagrams.py``). The
-   validator must catch an SVG older than its source.
+   validator must catch an SVG that no longer matches its source. It does so
+   by comparing a sha256 of the source, stamped into the SVG at render time,
+   with the current source. File modification times are not used, because
+   git sets them at checkout.
 
    **Alternatives considered**:
 

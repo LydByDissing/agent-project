@@ -1,7 +1,8 @@
-// [origin ref=llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
-//   [intent]Loads <project>/learn into a typed domain/topic/lesson tree and rejects any problem by naming the file and the fault.[/intent]
-//   [inv]loadLibrary returns a Library only when no problem was found; otherwise it throws LibraryError listing every problem.[/inv]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+//   [intent]Loads <project>/learn into a typed domain/topic/lesson tree and rejects any problem by naming the file and the fault, judging each referenced SVG by the sha256 stamped into it against its current source rather than by file modification times.[/intent]
+//   [inv]loadLibrary returns a Library only when no problem was found; otherwise it throws LibraryError listing every problem, and no diagram verdict ever reads a file's mtime.[/inv]
 // [/origin]
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -56,6 +57,7 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LESSON_FILE = /^(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
 const DIAGRAM_REF = /diagrams\/([A-Za-z0-9_.-]+)\.svg/g;
 const DIAGRAM_SOURCES = ['puml', 'd2', 'mmd'] as const;
+const SOURCE_STAMP = /<!--\s*sdd-source-sha256:\s*([0-9a-f]{64})\s*-->/;
 
 interface Index {
   title: string;
@@ -218,20 +220,30 @@ function referencedDiagrams(body: string): string[] {
   return [...names].sort();
 }
 
+/**
+ * A referenced SVG is current when its `<!-- sdd-source-sha256: <hex> -->` stamp
+ * equals the sha256 of one of its sibling sources (.puml, .d2 or .mmd). The stamp
+ * is written at render time by generate_diagrams.py, so a fresh git checkout
+ * validates regardless of file mtimes.
+ */
 function checkDiagram(diagramDir: string, name: string): string | undefined {
   const svg = join(diagramDir, `${name}.svg`);
   const sources = DIAGRAM_SOURCES.map((ext) => join(diagramDir, `${name}.${ext}`)).filter((p) => existsSync(p));
   const svgRel = `diagrams/${name}.svg`;
+  const sourceNames = sources.map((s) => `diagrams/${s.split(sep).pop()}`);
   if (sources.length === 0) {
     return `references ${svgRel}, but no diagrams/${name}.puml, .d2 or .mmd source exists`;
   }
   if (!existsSync(svg)) {
-    return `references ${svgRel}, which is missing (render it from ${sources.map((s) => `diagrams/${s.split(sep).pop()}`).join(' or ')})`;
+    return `references ${svgRel}, which is missing (render it from ${sourceNames.join(' or ')})`;
   }
-  const svgTime = statSync(svg).mtimeMs;
-  const newest = sources.reduce((best, s) => (statSync(s).mtimeMs > statSync(best).mtimeMs ? s : best));
-  if (statSync(newest).mtimeMs > svgTime) {
-    return `${svgRel} is older than its source diagrams/${newest.split(sep).pop()}; re-render it`;
+  const stamp = SOURCE_STAMP.exec(readFileSync(svg, 'utf8'));
+  if (!stamp) {
+    return `${svgRel} has no sdd-source-sha256 stamp; re-render it from ${sourceNames.join(' or ')}`;
+  }
+  const current = sources.map((s) => createHash('sha256').update(readFileSync(s)).digest('hex'));
+  if (!current.includes(stamp[1])) {
+    return `${svgRel} is out of date: its sdd-source-sha256 matches no current source (${sourceNames.join(' or ')}); re-render it`;
   }
   return undefined;
 }

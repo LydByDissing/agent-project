@@ -221,7 +221,7 @@ Run all shell commands from this directory.
 6. Verify acceptance criterion is met before writing result.
 
 7. Write result:
-   bd update <bd_id> --body-file - << 'DSL'
+   bd update <bd_id> --append-notes "$(cat <<'DSL'
    [result id=<task_id> s=ok|partial|fail|blocked]
    [artifact path=<path> a=new|mod|del n=<lines>]
    [suite t=<N> p=<N> f=<N>]
@@ -230,6 +230,11 @@ Run all shell commands from this directory.
    [new-req]<description>[/new-req]
    [/result]
    DSL
+   )"
+
+   Use --append-notes, never --body-file or --description: those replace
+   the issue description, which holds your [task] brief that testers,
+   reviewers and arch-review read through [ref].
 
 8. Close: bd close <bd_id>
 

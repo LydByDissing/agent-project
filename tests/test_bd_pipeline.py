@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.dsl_parser import parse_dsl, DslParseError
 from src.bd_runner import (
-    bd_create, bd_show, bd_update_body, bd_close,
+    bd_create, bd_show, bd_append_result, bd_close,
     bd_list, bd_ready, BdPipelineRunner
 )
 
@@ -99,7 +99,7 @@ def test_dependency_ordering():
 
     # Complete implement
     implement_id = implement_ids[0]
-    bd_update_body(implement_id, """[result id=t1 s=ok]
+    bd_append_result(implement_id, """[result id=t1 s=ok]
 [artifact a=mod n=+15 path=src/auth.py]
 [added fn=validate_token in:Request out:TokenResult]
 [/result]""")
@@ -118,7 +118,7 @@ def test_dependency_ordering():
         info = bd_show(sid)
         status = info.get("status", "")
         if status != "closed":
-            bd_update_body(sid, f"[result s=ok]Done[/result]")
+            bd_append_result(sid, "[result s=ok]Done[/result]")
             bd_close(sid)
 
     # Verify progress
@@ -168,7 +168,7 @@ Consider adding configurable rate limits per endpoint.
     ]
 
     for sid, result_dsl in zip(step_ids, results_data):
-        bd_update_body(sid, result_dsl)
+        bd_append_result(sid, result_dsl)
         bd_close(sid)
         print(f"  Completed: {sid}")
 
@@ -210,3 +210,21 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_result_append_keeps_task_brief_and_is_read_back():
+    brief = "[task id=t9 type=code]\n[goal]keep me[/goal]\n[/task]"
+    bd_id = bd_create("test: result keeps brief", brief, labels=["test-brief"], silent=True)
+    assert bd_id
+    try:
+        runner = BdPipelineRunner(verbose=False)
+        runner.update_result(bd_id, "[result id=t9 s=fail]\n[/result]")
+        runner.update_result(bd_id, "[result id=t9 s=ok]\n[artifact path=a.py a=new n=3]\n[/result]")
+        info = bd_show(bd_id)
+        got = runner.get_result(bd_id)
+        assert "[goal]keep me[/goal]" in info.get("description", "")
+        assert got["parsed_ok"] is True
+        assert got["status"] == "ok"
+    finally:
+        bd_close(bd_id)
+
