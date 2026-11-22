@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.12 req=REQ-SECURITY-REVIEW-001,REQ-SECURITY-REVIEW-002,REQ-SECURITY-REVIEW-004,REQ-SECURITY-REVIEW-005,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-012 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.12,llm-dsl-2zv1.16 req=REQ-SECURITY-REVIEW-001,REQ-SECURITY-REVIEW-002,REQ-SECURITY-REVIEW-004,REQ-SECURITY-REVIEW-005,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-012 c4=sdd_skills/security_review]
 #   [intent]Audit that following skills/security-review/SKILL.md literally yields records the real security gate accepts, that every acceptance clause has an instruction, and that no instruction contradicts the gate, the analyst agent or the safety rules.[/intent]
 # [/origin]
 
@@ -379,10 +379,28 @@ def test_design_flow_fails_without_decision_fields(flow):
 
 
 def test_design_flow_fails_when_tree_changes_after_record(flow):
+    # design stage hashes the tree at the record head: later implement commits do not matter,
+    # but a Tree cell (or head) forged at commit level fails
     design(flow)
     write(flow.repo, "skills/x/SKILL.md", "changed after record\n")
     git(flow.repo, "commit", "-qam", "skill edit")
     c = flow.check("design")
+    assert c.returncode == 0, c.stderr
+    p = flow.repo / "docs/source/security/reviews.rst"
+    t = p.read_text()
+    cells_tree = [w for w in t.split() if len(w) == 64 and all(ch in "0123456789abcdef" for ch in w)]
+    assert cells_tree, t
+    p.write_text(t.replace(cells_tree[0], "0" * 64))
+    git(flow.repo, "commit", "-qam", "forge tree cell")
+    c = flow.check("design")
+    assert c.returncode == 1 and "tree sha256 differs" in c.stderr
+
+
+def test_post_flow_fails_when_tree_changes_uncommitted_after_record(flow):
+    post(flow, "skills/security-review/SKILL.md=accepted, docs/source/security/**=accepted")
+    assert flow.check("post").returncode == 0
+    write(flow.repo, "skills/x/SKILL.md", "changed after post record\n")
+    c = flow.check("post")
     assert c.returncode == 1 and "tree sha256 differs" in c.stderr
 
 
@@ -480,10 +498,12 @@ def test_rebase_row_marker_counts_only_with_operator_prefix(flow):
     p.write_text(p.read_text() + render_row(cells))
     git(flow.repo, "add", "-A")
     git(flow.repo, "commit", "-qm", "rebase row")
-    # tree hash changed because docs/source/more.rst was added: re-record design is out of scope; only base check matters
+    # design tree hash is taken at the design record head, so the later docs/source/more.rst does not matter;
+    # only the base check is exercised and the operator rebase row moves it
     c = flow.check("design", newbase)
     assert "differs from recorded base" not in c.stderr and "effective base" not in c.stderr
-    assert "tree sha256 differs" in c.stderr
+    assert "tree sha256 differs" not in c.stderr
+    assert c.returncode == 0, c.stderr
 
 
 def test_rebase_row_without_operator_prefix_is_ignored(flow):

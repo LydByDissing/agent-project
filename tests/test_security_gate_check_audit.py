@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.4 req=REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.4,llm-dsl-2zv1.16 req=REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
 #   [intent]Audits security_gate.py check with end-to-end attack scenarios on real temp git repos, each of which must make the check fail for the named cause.[/intent]
 # [/origin]
 
@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_security_gate_check import EPIC, FEAT, GATE, RUN, SCRIPTS, SPEC, Repo, add_design, design_repo, post_repo, row, table, threat
+import security_gate_lib as lib
 
 REV = "docs/source/security/reviews.rst"
 SEC = "docs/source/security/**=accepted"
@@ -36,7 +37,7 @@ def ok(res):
 
 def post_with(tmp_path, name, path, listed, body="x\n"):
     r = add_design(design_repo(tmp_path, name))
-    design = row("design", r.base, r.base, r.tree())
+    design = row("design", r.base, r.dhead, r.dtree)
     r.w(path, body)
     i1 = r.commit("implement")
     r.w(TM, threat("mitigated", decided=True))
@@ -186,7 +187,7 @@ def test_protected_change_before_design_head_is_not_counted(tmp_path):
     r.w("src/z.py", "z\n")
     i1 = r.commit("impl")
     r.w(TM, threat("mitigated", decided=True))
-    r.w(REV, table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), SEC, "2")]))
+    r.w(REV, table([row("design", r.base, r.dhead, r.dtree), row("post", r.base, i1, r.tree(), SEC, "2")]))
     r.commit("post")
     ok(chk(r, "post", r.base))
     r.w("hooks/late.sh", "x\n")
@@ -248,8 +249,9 @@ def test_post_code_deleted_after_record_fails(tmp_path):
 
 @pytest.mark.parametrize("op", ["modify", "add", "delete", "rename", "nested_add"])
 def test_tree_hash_changes_under_skills_fail(tmp_path, op):
-    r = add_design(design_repo(tmp_path))
-    ok(chk(r, "design", r.base))
+    # post stage hashes the current tree: any skills/ change after the post record must fail
+    r = post_repo(tmp_path)
+    ok(chk(r, "post", r.base))
     s = r.p / "skills"
     if op == "modify":
         r.w("skills/s.md", "skill v1 edited\n")
@@ -261,41 +263,72 @@ def test_tree_hash_changes_under_skills_fail(tmp_path, op):
         (s / "s.md").rename(s / "t.md")
     else:
         r.w("skills/a/b/c.md", "n\n")
-    fails(chk(r, "design", r.base), "tree sha256 differs")
+    fails(chk(r, "post", r.base), "tree sha256 differs")
 
 
 @pytest.mark.parametrize("path", ["docs/source/a.rst", "docs/source/new/dir/n.rst", "docs/source/conf.py"])
 def test_tree_hash_changes_under_docs_source_fail(tmp_path, path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w(path, "changed\n")
-    fails(chk(r, "design", r.base), "tree sha256 differs")
+    fails(chk(r, "post", r.base), "tree sha256 differs")
 
 
 def test_tree_hash_uncommitted_disk_change_fails_and_is_reverted_ok(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
+    ok(chk(r, "post", r.base))
     r.w("skills/s.md", "dirty\n")
-    fails(chk(r, "design", r.base), "tree sha256 differs")
-    r.w("skills/s.md", "skill v1\n")
-    ok(chk(r, "design", r.base))
+    fails(chk(r, "post", r.base), "tree sha256 differs")
+    r.w("skills/s.md", "skill v2\n")
+    ok(chk(r, "post", r.base))
 
 
 @pytest.mark.parametrize("path", ["docs/source/security/extra.rst", "docs/source/security/threat-model/new.rst", "docs/source/security/accepted-risks.rst", f"docs/source/design_log/{FEAT}-{RUN}.rst"])
 def test_tree_hash_ignores_security_docs_and_run_design_log(tmp_path, path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w(path, "changed\n")
-    ok(chk(r, "design", r.base))
+    ok(chk(r, "post", r.base))
 
 
 def test_tree_hash_ignores_pycache(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w("skills/__pycache__/x.cpython-313.pyc", "bin\n")
     r.w("skills/y.pyc", "bin\n")
-    ok(chk(r, "design", r.base))
+    ok(chk(r, "post", r.base))
 
 
 def test_tree_hash_other_feature_or_run_design_log_counts(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w("docs/source/design_log/FEAT-X-bbbbbbbb.rst", "x\n")
+    fails(chk(r, "post", r.base), "tree sha256 differs")
+
+
+@pytest.mark.parametrize("which", ["tree_of_earlier_commit", "zeros", "correct"])
+def test_design_tree_cell_must_match_design_record_head_commit(tmp_path, which):
+    # design stage: tamper at commit level; a Tree cell that is not the hash of the record head's tree fails
+    r = design_repo(tmp_path)
+    earlier = lib.tree_hash_at(r.p, r.git("rev-parse", "HEAD"), FEAT, RUN)
+    r.w("skills/s.md", "changed after head\n")
+    r.commit("later")
+    if which == "correct":
+        add_design(r)
+        assert r.dtree != earlier
+        ok(chk(r, "design", r.base))
+        return
+    add_design(r, tree=earlier if which == "tree_of_earlier_commit" else "0" * 64)
+    fails(chk(r, "design", r.base), "tree sha256 differs")
+
+
+def test_design_record_head_moved_to_other_commit_fails(tmp_path):
+    # design record whose head is changed to another commit no longer matches its recorded tree
+    r = design_repo(tmp_path)
+    c1 = r.git("rev-parse", "HEAD")
+    r.w("skills/s.md", "v2\n")
+    c2 = r.commit("c2")
+    add_design(r)  # head = c2 with c2's tree
+    assert r.dhead == c2
+    ok(chk(r, "design", r.base))
+    r.w(REV, table([row("design", r.base, c1, r.dtree)]))
+    r.commit("forge head")
     fails(chk(r, "design", r.base), "tree sha256 differs")
 
 

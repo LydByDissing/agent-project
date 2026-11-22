@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7,llm-dsl-2zv1.10 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7,llm-dsl-2zv1.10,llm-dsl-2zv1.16 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
 #   [intent]Parses threat, risk and review records and feature needs from the docs tree and validates analysis findings against them.[/intent]
 #   [inv]validate_findings returns one message per violated rule naming the finding id; it never raises on malformed finding fields.[/inv]
 #   [inv]redact_scan returns one message per likely credential naming file:line and type and never contains more than the first 4 characters of a match.[/inv]
@@ -7,6 +7,7 @@
 
 import fnmatch
 import hashlib
+import io
 import json
 import math
 import os
@@ -14,6 +15,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -226,6 +228,7 @@ def validate_findings(findings: list, data: dict, feat: str) -> list[str]:
     return errs
 
 
+RULES_REL = "skills/rules/RULES.md"
 REVIEWS_REL = "docs/source/security/reviews.rst"
 SECURITY_REL = "docs/source/security"
 DESIGN_LOG_REL = "docs/source/design_log"
@@ -272,48 +275,76 @@ def is_log(rel: str, feat: str, run: str) -> bool:
     return d == DESIGN_LOG_REL and name.startswith(log_name(feat, run)) and name.endswith(".rst")
 
 
-def tree_hash(repo: Path, feat: str, run: str) -> str:
+def tree_skip(rel: str, feat: str, run: str) -> bool:
+    return rel.endswith(".pyc") or "__pycache__" in rel.split("/") or rel.startswith(f"{SECURITY_REL}/") or is_log(rel, feat, run)
+
+
+def tree_digest(items: list[tuple[str, bytes]]) -> str:
     h = hashlib.sha256()
-    for top in ("docs/source", "skills"):
-        root = repo / top
-        for dp, dns, fns in os.walk(root):
-            dns[:] = sorted(d for d in dns if d != "__pycache__")
-            for fn in sorted(fns):
-                p = Path(dp) / fn
-                rel = p.relative_to(repo).as_posix()
-                if fn.endswith(".pyc") or rel.startswith(f"{SECURITY_REL}/") or is_log(rel, feat, run):
-                    continue
-                h.update(f"{rel}\0{hashlib.sha256(p.read_bytes()).hexdigest()}\n".encode())
+    for rel, data in sorted(items):
+        h.update(f"{rel}\0{hashlib.sha256(data).hexdigest()}\n".encode())
     return h.hexdigest()
 
 
-def protected_set(repo: Path) -> list[str]:
+def tree_hash(repo: Path, feat: str, run: str) -> str:
+    items: list[tuple[str, bytes]] = []
+    for top in ("docs/source", "skills"):
+        for dp, dns, fns in os.walk(repo / top):
+            for fn in fns:
+                p = Path(dp) / fn
+                rel = p.relative_to(repo).as_posix()
+                if not tree_skip(rel, feat, run):
+                    items.append((rel, p.read_bytes()))
+    return tree_digest(items)
+
+
+def tree_hash_at(repo: Path, commit: str, feat: str, run: str) -> str:
+    r = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", commit, "docs/source", "skills"], capture_output=True)
+    items: list[tuple[str, bytes]] = []
+    if r.returncode == 0:
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+            for m in tf.getmembers():
+                if m.isfile() and not tree_skip(m.name, feat, run):
+                    items.append((m.name, tf.extractfile(m).read()))
+    return tree_digest(items)
+
+
+def parse_protected(text: str) -> list[str]:
     pats: list[str] = []
-    rules = repo / "skills" / "rules" / "RULES.md"
-    if rules.exists():
-        on, lvl = False, 0
-        for ln in rules.read_text(encoding="utf-8").splitlines():
-            m = re.match(r"^(#+)\s+(.*)$", ln)
-            if m:
-                if on and len(m.group(1)) <= lvl:
-                    on = False
-                if m.group(2).strip().lower().startswith("protected set"):
-                    on, lvl = True, len(m.group(1))
-                continue
-            if on:
-                pats += re.findall(r"`([^`\s]+)`", ln)
-    if not pats:
-        pats = list(DEFAULT_PROTECTED)
-        gate = repo / "scripts" / "security_gate.py"
-        if gate.exists():
-            mods = re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", gate.read_text(encoding="utf-8"), re.M)
-            pats += [f"scripts/{m}.py" for m in dict.fromkeys(mods) if (repo / "scripts" / f"{m}.py").exists()]
-        pats += ["tests/test_security_gate*.py", "tests/test_*append_only*.py"]
+    on, lvl = False, 0
+    for ln in text.splitlines():
+        m = re.match(r"^(#+)\s+(.*)$", ln)
+        if m:
+            if on and len(m.group(1)) <= lvl:
+                on = False
+            if m.group(2).strip().lower().startswith("protected set"):
+                on, lvl = True, len(m.group(1))
+            continue
+        if on:
+            pats += re.findall(r"`([^`\s]+)`", ln)
     return pats
 
 
-def protected_hits(repo: Path, paths: list[str]) -> list[str]:
-    pats = protected_set(repo)
+def default_protected(repo: Path) -> list[str]:
+    pats = list(DEFAULT_PROTECTED)
+    gate = repo / "scripts" / "security_gate.py"
+    if gate.exists():
+        mods = re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", gate.read_text(encoding="utf-8"), re.M)
+        pats += [f"scripts/{m}.py" for m in dict.fromkeys(mods) if (repo / "scripts" / f"{m}.py").exists()]
+    return pats + ["tests/test_security_gate*.py", "tests/test_*append_only*.py"]
+
+
+def protected_set(repo: Path, base: str = "") -> list[str]:
+    if base:
+        rc, txt = git(repo, "show", f"{base}:{RULES_REL}")
+        return list(dict.fromkeys(parse_protected(txt) if rc == 0 else []) | dict.fromkeys(default_protected(repo)) | {RULES_REL: 0}.keys())
+    rules = repo / RULES_REL
+    pats = parse_protected(rules.read_text(encoding="utf-8")) if rules.exists() else []
+    return pats or default_protected(repo)
+
+
+def protected_hits(repo: Path, paths: list[str], base: str = "") -> list[str]:
+    pats = protected_set(repo, base)
     return [p for p in paths if any(glob_match(x, p) for x in pats)]
 
 
@@ -433,8 +464,14 @@ def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main:
         want = rec.get("tree", "")
         if not SHA256.match(want):
             errs.append(f"review record for run {run} stage {stage} has no tree hash")
-        elif want != tree_hash(repo, feat, run):
-            errs.append(f"tree sha256 differs from review record ({want[:12]} recorded, {tree_hash(repo, feat, run)[:12]} current)")
+        else:
+            dc = rev(repo, rec_head(rec)) if stage == "design" else ""
+            if stage == "design" and not dc:
+                errs.append(f"design record head {rec_head(rec)!r} is not a commit; cannot compute its tree hash")
+            else:
+                cur_h = tree_hash_at(repo, dc, feat, run) if dc else tree_hash(repo, feat, run)
+                if want != cur_h:
+                    errs.append(f"tree sha256 differs from review record ({want[:12]} recorded, {cur_h[:12]} {'at design head' if dc else 'current'})")
     lt = linked_threats(data, feat)
     errs += [f"threat {t['opts'].get('id')} has no REQ link; counted as belonging to {feat}" for t in lt if not has_req_link(t)]
     if base and head:
@@ -460,7 +497,7 @@ def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main:
                 errs.append(f"run {run}: no design record head to measure protected-set changes from")
             else:
                 ch = git(repo, "diff", "--no-renames", "--name-only", f"{dh}..HEAD")[1].split("\n")
-                hits = protected_hits(repo, [p for p in ch if p])
+                hits = protected_hits(repo, [p for p in ch if p], base)
                 if hits:
                     ok = rec in added_rows(repo)
                     ent = [e.rpartition("=") for e in split_ids(rec.get("protected", ""))]
@@ -769,4 +806,18 @@ def redact_paths(repo: Path, paths: list[str], feat: str, run: str) -> list[Path
     out: list[Path] = []
     for r in roots:
         out += sorted(x for x in r.rglob("*") if x.is_file() and not skip_file(x)) if r.is_dir() else [r]
+    return out
+
+
+def base_path_info(repo: Path, run: str) -> list[str]:
+    base = eff_base(repo, run)
+    if not base:
+        return []
+    out = [f"base={base}"]
+    for f in ("scripts/security_gate.py", "scripts/security_gate_lib.py"):
+        if git(repo, "cat-file", "-e", f"{base}:{f}")[0] != 0:
+            st = "absent"
+        else:
+            st = "differs" if git(repo, "diff", "--name-only", base, "HEAD", "--", f)[1].strip() else "same"
+        out.append(f"{Path(f).name}={st}")
     return out

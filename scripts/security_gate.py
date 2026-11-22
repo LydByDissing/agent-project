@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7,llm-dsl-2zv1.16 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
 #   [intent]Command line entry for the security gate script; validate checks records and findings, check gates a phase move on the review record, base, tree hash and protected-set rules, append-only fails when security records were removed or altered since given commits, redact-check fails on likely credentials in security outputs without echoing them.[/intent]
 # [/origin]
 
@@ -54,6 +54,28 @@ def cmd_check(a) -> int:
     return 1 if errs else 0
 
 
+def cmd_base_path(a) -> int:
+    repo = Path(a.repo).resolve()
+    run = a.run
+    if not run and a.epic:
+        try:
+            runs = lib.label_vals(lib.load_epic(a.bd_json, a.epic), "run")
+        except (OSError, ValueError) as e:
+            print(f"ERROR epic unreadable: {e}", file=sys.stderr)
+            return 1
+        run = runs[0] if len(runs) == 1 else ""
+    if not run:
+        rc, txt = lib.git(repo, "show", f"HEAD:{lib.REVIEWS_REL}")
+        rows = lib.parse_reviews_text(txt) if rc == 0 else []
+        run = rows[-1]["run"] if rows else ""
+    lines = lib.base_path_info(repo, run) if run else []
+    if not lines:
+        print(f"ERROR no effective base found for run {run or '?'}", file=sys.stderr)
+        return 1
+    print("\n".join(lines))
+    return 0
+
+
 def cmd_tree_hash(a) -> int:
     print(lib.tree_hash(Path(a.repo).resolve(), a.feature, a.run))
     return 0
@@ -101,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--run", required=True)
     t.add_argument("--repo", default=str(DOCS.parent.parent))
     t.set_defaults(fn=cmd_tree_hash)
+    b = sub.add_parser("base-path")
+    b.add_argument("--repo", default=str(DOCS.parent.parent))
+    b.add_argument("--epic")
+    b.add_argument("--run")
+    b.add_argument("--bd-json")
+    b.set_defaults(fn=cmd_base_path)
     o = sub.add_parser("append-only")
     o.add_argument("--run", required=True)
     o.add_argument("--since")

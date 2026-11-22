@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.3 req=REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.3,llm-dsl-2zv1.16 req=REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
 #   [intent]Tests security_gate.py check against temp git repos built with real git and a fake bd epic JSON, one test per failure cause.[/intent]
 # [/origin]
 
@@ -75,8 +75,10 @@ class Repo:
         return r.returncode, r.stdout, r.stderr
 
 
-def design_repo(tmp_path, name="r"):
+def design_repo(tmp_path, name="r", rules=""):
     r = Repo(tmp_path / name)
+    if rules:
+        r.w("skills/rules/RULES.md", rules)
     r.w("docs/source/specs/features/f.rst", SPEC)
     r.w("docs/source/security/threat-model/my-box.rst", threat())
     r.w("docs/source/security/reviews.rst", table([]))
@@ -97,20 +99,21 @@ def design_repo(tmp_path, name="r"):
 
 
 def add_design(r, tree=None, outcome="ok"):
+    r.dhead = r.git("rev-parse", "HEAD")
+    r.dtree = lib.tree_hash_at(r.p, r.dhead, FEAT, RUN) if tree is None else tree
     r.w("docs/source/security/threat-model/my-box.rst", threat(decided=True))
-    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree() if tree is None else tree, outcome=outcome)]))
+    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.dhead, r.dtree, outcome=outcome)]))
     r.dsha = r.commit("design gate")
     return r
 
 
 def post_repo(tmp_path, name="p"):
     r = add_design(design_repo(tmp_path, name))
-    r.dtree = r.tree()
     r.w("skills/s.md", "skill v2\n")
     r.w("docs/source/c.rst", "C\n")
     i1 = r.commit("implement")
     r.w("docs/source/security/threat-model/my-box.rst", threat("mitigated", decided=True))
-    rows = [row("design", r.base, r.base, r.dtree), row("post", r.base, i1, r.tree(), "skills/**=accepted docs/source/security/**=accepted", "2")]
+    rows = [row("design", r.base, r.dhead, r.dtree), row("post", r.base, i1, r.tree(), "skills/**=accepted docs/source/security/**=accepted", "2")]
     r.w("docs/source/security/reviews.rst", table(rows))
     r.i1 = i1
     r.psha = r.commit("post gate")
@@ -157,9 +160,9 @@ def test_no_record_for_stage(tmp_path):
 
 
 def test_tree_hash_mismatch(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w("skills/s.md", "tampered\n")
-    fails(r.check("design", r.base), "tree sha256 differs")
+    fails(r.check("post", r.base), "tree sha256 differs")
 
 
 def test_tree_hash_missing(tmp_path):
@@ -168,12 +171,12 @@ def test_tree_hash_missing(tmp_path):
 
 
 def test_tree_hash_ignores_security_docs_and_design_log(tmp_path):
-    r = add_design(design_repo(tmp_path))
+    r = post_repo(tmp_path)
     r.w("docs/source/security/extra.rst", "x\n")
     r.w(f"docs/source/design_log/{FEAT}-{RUN}-more.rst", "x\n")
-    assert r.check("design", r.base)[0] == 0
+    assert r.check("post", r.base)[0] == 0
     r.w("docs/source/design_log/other.rst", "x\n")
-    fails(r.check("design", r.base), "tree sha256 differs")
+    fails(r.check("post", r.base), "tree sha256 differs")
 
 
 def test_design_open_threat_without_decision(tmp_path):
@@ -244,20 +247,109 @@ def test_protected_post_record_not_in_latest_reviews_commit(tmp_path):
 
 
 def test_protected_set_read_from_rules_section(tmp_path):
-    r = design_repo(tmp_path)
-    r.w("skills/rules/RULES.md", "# R\n\n## Protected set\n\n- `custom/**`\n\n## Next\n\n- `skills/**`\n")
-    r.commit("rules")
+    r = design_repo(tmp_path, rules="# R\n\n## Protected set\n\n- `custom/**`\n\n## Next\n\n- `other/**`\n")
     add_design(r)
     r.w("custom/x.txt", "x\n")
     i1 = r.commit("impl")
     r.w("docs/source/security/threat-model/my-box.rst", threat("mitigated", decided=True))
-    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "-", "2")]))
+    d = row("design", r.base, r.dhead, r.dtree)
+    r.w("docs/source/security/reviews.rst", table([d, row("post", r.base, i1, r.tree(), "docs/source/security/**=accepted", "2")]))
     r.commit("post")
     fails(r.check("post", r.base), "protected path custom/x.txt changed")
-    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "-", "2"), row("post", r.base, i1, r.tree(), "custom/x.txt=accepted", "3")]))
+    r.w("docs/source/security/reviews.rst", table([d, row("post", r.base, i1, r.tree(), "docs/source/security/**=accepted", "2"), row("post", r.base, i1, r.tree(), "custom/x.txt=accepted docs/source/security/**=accepted", "3")]))
     r.commit("list it")
     rc, out, err = r.check("post", r.base)
-    assert "protected path custom/x.txt" not in err, err
+    assert rc == 0, err
+
+
+def test_protected_set_rewritten_in_run_does_not_shrink_it(tmp_path):
+    r = design_repo(tmp_path, rules="# R\n\n## Protected set\n\n- `custom/**`\n")
+    add_design(r)
+    r.w("skills/rules/RULES.md", "# R\n\n## Protected set\n\n- `nothing/**`\n")
+    r.w("skills/s.md", "tampered\n")
+    r.w("custom/y.txt", "y\n")
+    r.w("scripts/security_gate.py", "x = 1\n")
+    i1 = r.commit("implement rewrites the protected set")
+    r.w("docs/source/security/threat-model/my-box.rst", threat("mitigated", decided=True))
+    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.dhead, r.dtree), row("post", r.base, i1, r.tree(), "docs/source/security/**=accepted", "2")]))
+    r.commit("post")
+    rc, out, err = r.check("post", r.base)
+    assert rc == 1
+    for p in ("skills/rules/RULES.md", "skills/s.md", "custom/y.txt", "scripts/security_gate.py"):
+        assert f"protected path {p} changed" in err, err
+
+
+def test_protected_set_defaults_when_rules_absent_at_base(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    r.w("skills/rules/RULES.md", "# R\n\n## Protected set\n\n- `nothing/**`\n")
+    i1 = r.commit("rules added in run")
+    r.w("docs/source/security/threat-model/my-box.rst", threat("mitigated", decided=True))
+    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.dhead, r.dtree), row("post", r.base, i1, r.tree(), "docs/source/security/**=accepted", "2")]))
+    r.commit("post")
+    fails(r.check("post", r.base), "protected path skills/rules/RULES.md changed")
+
+
+def test_design_check_passes_after_implement_changes(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    assert r.check("design", r.base)[0] == 0
+    r.w("skills/s.md", "changed by implement\n")
+    r.w("docs/source/new.rst", "new\n")
+    r.commit("implement")
+    rc, out, err = r.check("design", r.base)
+    assert rc == 0, err
+
+
+def test_design_check_fails_when_hash_is_not_design_head_tree(tmp_path):
+    r = design_repo(tmp_path)
+    old = lib.tree_hash_at(r.p, r.git("rev-parse", "HEAD"), FEAT, RUN)
+    r.w("skills/s.md", "changed\n")
+    r.commit("later")
+    add_design(r, tree=old)
+    fails(r.check("design", r.base), "tree sha256 differs")
+    add_design(r, tree="0" * 64)
+    fails(r.check("design", r.base), "tree sha256 differs")
+
+
+def test_base_path_prints_base_and_script_states(tmp_path):
+    r = Repo(tmp_path / "bp")
+    r.w("docs/source/specs/features/f.rst", SPEC)
+    r.w("docs/source/security/threat-model/my-box.rst", threat())
+    r.w("docs/source/security/reviews.rst", table([]))
+    r.w("scripts/security_gate.py", GATE.read_text())
+    shutil.copy(SCRIPTS / "security_gate_lib.py", r.p / "scripts")
+    r.commit("c0")
+    r.git("checkout", "-q", "-b", "feat")
+    r.base = r.git("rev-parse", "HEAD")
+    add_design(r)
+    cmd = [sys.executable, str(GATE), "base-path", "--repo", str(r.p), "--epic", EPIC, "--bd-json", str(r.epic(r.base))]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout.split() == [f"base={r.base}", "security_gate.py=same", "security_gate_lib.py=same"], out
+    (r.p / "scripts" / "security_gate_lib.py").write_text("x = 1\n")
+    r.commit("lib changed")
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    assert "security_gate_lib.py=differs" in out.stdout and "security_gate.py=same" in out.stdout
+
+
+def test_base_copy_run_from_worktree_against_real_repo_path(tmp_path):
+    r = Repo(tmp_path / "bw")
+    r.w("docs/source/specs/features/f.rst", SPEC)
+    r.w("docs/source/security/threat-model/my-box.rst", threat())
+    r.w("docs/source/security/reviews.rst", table([]))
+    r.w("scripts/security_gate.py", GATE.read_text())
+    shutil.copy(SCRIPTS / "security_gate_lib.py", r.p / "scripts")
+    r.commit("c0")
+    r.git("checkout", "-q", "-b", "feat")
+    r.base = r.git("rev-parse", "HEAD")
+    add_design(r)
+    (r.p / "scripts" / "security_gate_lib.py").write_text("raise SystemExit(99)\n")
+    r.commit("head lib broken")
+    wt = tmp_path / "wt"
+    r.git("worktree", "add", "--detach", str(wt), r.base)
+    try:
+        res = subprocess.run([sys.executable, "-I", str(wt / "scripts" / "security_gate.py"), "check", "--feature", FEAT, "--stage", "design", "--epic", EPIC, "--repo", str(r.p), "--bd-json", str(r.epic(r.base))], capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr
+    finally:
+        r.git("worktree", "remove", "--force", str(wt))
 
 
 def test_epic_base_label_missing_and_duplicate(tmp_path):
