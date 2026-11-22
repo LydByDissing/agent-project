@@ -1,5 +1,5 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
-#   [intent]Command line entry for the security gate script; validate checks records and findings, check gates a phase move on the review record, base, tree hash and protected-set rules.[/intent]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009 c4=sdd_skills/security_review]
+#   [intent]Command line entry for the security gate script; validate checks records and findings, check gates a phase move on the review record, base, tree hash and protected-set rules, append-only fails when security records were removed or altered since given commits.[/intent]
 # [/origin]
 
 import argparse
@@ -59,6 +59,16 @@ def cmd_tree_hash(a) -> int:
     return 0
 
 
+def cmd_append_only(a) -> int:
+    repo = Path(a.repo).resolve()
+    since = [x for x in (a.since or "").split(",") if x] or lib.default_since(repo, a.run)
+    errs = lib.run_append_only(repo, a.run, since)
+    print(f"append-only run {a.run} since {','.join(x[:8] for x in since) or '-'}: {'FAIL' if errs else 'ok'}")
+    for e in errs:
+        print(f"ERROR {e}", file=sys.stderr)
+    return 1 if errs else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="security_gate")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -81,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--run", required=True)
     t.add_argument("--repo", default=str(DOCS.parent.parent))
     t.set_defaults(fn=cmd_tree_hash)
+    o = sub.add_parser("append-only")
+    o.add_argument("--run", required=True)
+    o.add_argument("--since")
+    o.add_argument("--repo", default=str(DOCS.parent.parent))
+    o.set_defaults(fn=cmd_append_only)
     a = p.parse_args(argv)
     return a.fn(a)
 

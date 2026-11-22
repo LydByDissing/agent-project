@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009 c4=sdd_skills/security_review]
 #   [intent]Parses threat, risk and review records and feature needs from the docs tree and validates analysis findings against them.[/intent]
 #   [inv]validate_findings returns one message per violated rule naming the finding id; it never raises on malformed finding fields.[/inv]
 #   [inv]run_check returns an empty error list only when every REQ-008/011 rule holds; each failed rule adds a message naming its cause.[/inv]
@@ -35,14 +35,18 @@ def split_ids(s: str) -> list[str]:
 
 
 def parse_needs(path: Path) -> list[dict]:
+    return parse_needs_text(path.read_text(encoding="utf-8"), str(path))
+
+
+def parse_needs_text(text: str, name: str) -> list[dict]:
     out: list[dict] = []
     cur = None
     last = None
     body = False
-    for ln, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for ln, raw in enumerate(text.splitlines(), 1):
         m = DIRECTIVE.match(raw)
         if m:
-            cur = {"type": m.group(1), "title": m.group(2).strip(), "file": str(path), "line": ln, "opts": {}}
+            cur = {"type": m.group(1), "title": m.group(2).strip(), "file": name, "line": ln, "opts": {}}
             out.append(cur)
             last = None
             body = False
@@ -224,6 +228,7 @@ DEFAULT_PROTECTED = (
     "mcp-servers.json", "scripts/security_gate.py", "tests/conftest.py", "pyproject.toml", "pytest.ini",
     "setup.cfg", "tox.ini", "docs/source/conf.py",
 )
+SEC_PREFIX = SECURITY_REL + "/"
 BOOTSTRAP_LINE = "gate script unverified (bootstrap)"
 REEXEC_ENV = "SDD_GATE_REEXEC"
 BD_CMD_ENV = "SDD_BD_SHOW_CMD"
@@ -474,3 +479,135 @@ def reexec_base(repo: Path, base: str, argv: list[str]) -> int:
         git(repo, "worktree", "remove", "--force", str(wt))
         git(repo, "worktree", "prune")
         os.rmdir(tmp) if os.path.isdir(tmp) and not os.listdir(tmp) else None
+
+
+def eff_base(repo: Path, run: str) -> str:
+    first = first_base(repo, run)[1]
+    rc, txt = git(repo, "show", f"HEAD:{REVIEWS_REL}")
+    rows = [r for r in parse_reviews_text(txt) if r.get("run") == run] if rc == 0 else []
+    reb = [r for r in rows if r.get("stage") == "rebase" and r.get("outcome", "").startswith("decided_by=operator") and r.get("base")]
+    eff = reb[-1]["base"] if reb else first
+    return rev(repo, eff) if eff else ""
+
+
+def latest_review_commit(repo: Path, run: str) -> str:
+    rc, out = git(repo, "log", "--format=%H", "--", REVIEWS_REL)
+    for c in out.split() if rc == 0 else []:
+        rows = [r for r in parse_reviews_text(git(repo, "show", f"{c}:{REVIEWS_REL}")[1]) if r.get("run") == run]
+        rc2, prev = git(repo, "show", f"{c}~1:{REVIEWS_REL}")
+        old = [r for r in parse_reviews_text(prev) if r.get("run") == run] if rc2 == 0 else []
+        keys = {(r.get("stage"), r.get("review")) for r in old}
+        if any((r.get("stage"), r.get("review")) not in keys for r in rows):
+            return c
+    return ""
+
+
+def default_since(repo: Path, run: str) -> list[str]:
+    out = [c for c in (eff_base(repo, run), latest_review_commit(repo, run)) if c]
+    return list(dict.fromkeys(out))
+
+
+def sec_records(repo: Path, commit: str) -> dict:
+    rc, out = git(repo, "ls-tree", "-r", "--name-only", commit, "--", SECURITY_REL)
+    needs: list[dict] = []
+    reviews: list[dict] = []
+    for f in out.split() if rc == 0 else []:
+        if not f.endswith(".rst"):
+            continue
+        txt = git(repo, "show", f"{commit}:{f}")[1]
+        if f == REVIEWS_REL:
+            reviews = parse_reviews_text(txt)
+        needs += [n for n in parse_needs_text(txt, f) if n["type"] in ("threat", "risk")]
+    return {"needs": {n["opts"].get("id", ""): n for n in needs if n["opts"].get("id")}, "reviews": reviews}
+
+
+def decision_entries(n: dict) -> list[dict]:
+    o = n["opts"]
+    out: list[dict] = []
+    for part in [p.strip() for p in o.get("decisions", "").split(";") if p.strip()]:
+        out.append({k: v.strip('"') for k, v in re.findall(r'([a-z_]+)=("[^"]*"|\S+)', part)})
+    if o.get("decided_by") and o.get("run"):
+        out += [{"run": r, "decided_by": d} for r in split_ids(o["run"]) for d in split_ids(o["decided_by"])]
+    return out
+
+
+def has_op_decision(n: dict, run: str) -> bool:
+    return any(e.get("run") == run and e.get("decided_by") == "operator" for e in decision_entries(n))
+
+
+def review_key(r: dict) -> tuple:
+    return (r.get("run"), r.get("stage"), r.get("review"))
+
+
+def append_only_errs(old: dict, new: dict, run: str, since: str) -> list[str]:
+    errs: list[str] = []
+    tag = f"(since {since[:8]})"
+    for nid, o in old["needs"].items():
+        n = new["needs"].get(nid)
+        if n is None:
+            errs.append(f"{o['type']} {nid} disappeared {tag}")
+            continue
+        if o["type"] == "risk" and o["opts"].get("rationale", "") != n["opts"].get("rationale", ""):
+            errs.append(f"risk {nid} rationale changed {tag}")
+        have = decision_entries(n)
+        for e in decision_entries(o):
+            if not any(all(h.get(k) == v for k, v in e.items()) for h in have):
+                errs.append(f"{o['type']} {nid} decision entry run={e.get('run')} removed or altered {tag}")
+        if o["type"] == "threat" and o["opts"].get("status", "") != n["opts"].get("status", "") and not has_op_decision(n, run):
+            errs.append(f"threat {nid} status changed {o['opts'].get('status', '')!r} -> {n['opts'].get('status', '')!r} without an operator decision for run {run} {tag}")
+    now = {review_key(r): r for r in new["reviews"]}
+    for r in old["reviews"]:
+        k = review_key(r)
+        if k not in now:
+            errs.append(f"review row run={k[0]} stage={k[1]} review={k[2]} removed {tag}")
+        elif not any(all(x.get(c) == v for c, v in r.items()) for x in new["reviews"] if review_key(x) == k):
+            errs.append(f"review row run={k[0]} stage={k[1]} review={k[2]} altered {tag}")
+    return errs
+
+
+def head_errs(new: dict, run: str) -> list[str]:
+    errs: list[str] = []
+    seen: dict[tuple, int] = {}
+    for r in new["reviews"]:
+        seen[review_key(r)] = seen.get(review_key(r), 0) + 1
+    errs += [f"review row run={k[0]} stage={k[1]} review={k[2]} appears {c} times" for k, c in seen.items() if c > 1]
+    needs = new["needs"]
+    succ: dict[str, list[str]] = {}
+    for nid, n in needs.items():
+        tgt = n["opts"].get("supersedes", "").strip()
+        if not tgt:
+            continue
+        succ.setdefault(tgt, []).append(nid)
+        t = needs.get(tgt)
+        if t is None:
+            errs.append(f"{nid} supersedes {tgt}, which does not exist")
+            continue
+        if container_of(t["file"]) != container_of(n["file"]):
+            errs.append(f"{nid} supersedes {tgt} in another container")
+        if n["opts"].get("status", "") != t["opts"].get("status", "") and not has_op_decision(n, run):
+            errs.append(f"{nid} supersedes {tgt} with a different status and no operator decision for run {run}")
+    errs += [f"{tgt} has {len(ids)} successors ({', '.join(ids)})" for tgt, ids in succ.items() if len(ids) > 1]
+    for nid in needs:
+        cur, hops = nid, 0
+        while cur in needs and needs[cur]["opts"].get("supersedes", "").strip() and hops <= len(needs):
+            cur = needs[cur]["opts"]["supersedes"].strip()
+            hops += 1
+            if cur == nid:
+                errs.append(f"supersedes cycle through {nid}")
+                break
+    return errs
+
+
+def run_append_only(repo: Path, run: str, since: list[str]) -> list[str]:
+    errs: list[str] = []
+    new = sec_records(repo, "HEAD")
+    if not rev(repo, "HEAD"):
+        return ["HEAD does not resolve to a commit"]
+    for s in since:
+        c = rev(repo, s)
+        if not c:
+            errs.append(f"since {s} is not a commit in this repository")
+            continue
+        errs += append_only_errs(sec_records(repo, c), new, run, c)
+    errs += head_errs(new, run)
+    return list(dict.fromkeys(errs))
