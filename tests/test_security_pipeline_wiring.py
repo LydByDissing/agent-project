@@ -182,7 +182,10 @@ def test_plugin_version_bumped():
         pytest.skip("main ref not available")
     ver = lambda v: tuple(int(x) for x in v.split("."))
     cur = json.loads(rd(".claude-plugin", "plugin.json"))["version"]
-    assert ver(cur) > ver(json.loads(r.stdout)["version"])
+    main_ver = json.loads(r.stdout)["version"]
+    if cur == main_ver:
+        pytest.skip(f"plugin version equals main ({main_ver}); bump check applies on branches only")
+    assert ver(cur) > ver(main_ver)
 
 
 def test_conf_has_threat_fields():

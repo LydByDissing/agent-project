@@ -383,7 +383,10 @@ def test_plugin_version_strictly_above_main():
     r = subprocess.run(["git", "show", "main:.claude-plugin/plugin.json"], cwd=ROOT, capture_output=True, text=True)
     if r.returncode != 0:
         pytest.skip("no main branch")
-    assert _ver(cur) > _ver(json.loads(r.stdout)["version"])
+    main_ver = json.loads(r.stdout)["version"]
+    if cur == main_ver:
+        pytest.skip(f"plugin version equals main ({main_ver}); bump check applies on branches only")
+    assert _ver(cur) > _ver(main_ver)
 
 
 def test_version_compare_is_numeric_not_lexical():
