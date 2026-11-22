@@ -3,9 +3,10 @@ SDD Skills — Threat Model
 
 Container: ``sdd_skills``. Threats recorded by the design-time security
 review of FEAT-SECURITY-REVIEW (run 87708f1a, 2026-11-22): 001..012 from the
-first review, 013..014 from review 2, 015..017 from review 3. 001..014 are
+first review, 013..014 from review 2, 015..017 from review 3, 018..021 from
+the narrow check after reset 3. 001..014 are
 ``open`` until the linked requirements are implemented and verified;
-015..017 are ``noted`` by the operator and handled during implementation.
+015..021 are ``noted`` by the operator and handled during implementation.
 
 Trust boundaries
 ----------------
@@ -205,3 +206,50 @@ Threats
    "disable the mitigation and a test fails", which invites marking them noted
    instead of mitigated. Noted 2026-11-22 (review 3, SD3-07).
 
+.. threat:: Run-created records unprotected by base-only comparison
+   :id: THREAT-SDD-SKILLS-018
+   :status: noted
+   :stride: T
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Plan acceptance check: also compare with the latest gate commit, and read the base from the git commit that first added the run's first review record.
+   :links: REQ-SECURITY-REVIEW-009, REQ-SECURITY-REVIEW-011
+
+   The append-only test compares only with the base commit, so review records, this run's decisions, this feature's threats and the stored base, all created during the run, can be altered between gates. Noted 2026-11-22 (narrow check, SD4-01) under the operator's policy for this step.
+
+.. threat:: Forged edits hidden in legitimate protected-path changes
+   :id: THREAT-SDD-SKILLS-019
+   :status: noted
+   :stride: T
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Plan acceptance check: measure implement-phase protected changes from the last design record's head; list records added since; accept only the record added by the post gate's own commit.
+   :links: REQ-SECURITY-REVIEW-008
+
+   Path-level base..HEAD comparison cannot separate forged additions from expected changes to protected paths; a worker can add its own post review record. Noted 2026-11-22 (narrow check, SD4-02) under the operator's policy for this step.
+
+.. threat:: Post check fails on legitimate bd and design-log commits
+   :id: THREAT-SDD-SKILLS-020
+   :status: noted
+   :stride: D
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Implementation: allow .beads/** and the run's design log in the head..HEAD rule; exclude the design log from the hash or hash at gate-commit time.
+   :links: REQ-SECURITY-REVIEW-008
+
+   Tracked .beads/** commits and the run's design log written after the hash make the post head rule and tree hash fail, pushing the operator toward a bypass. Noted 2026-11-22 (narrow check, SD4-03) under the operator's policy for this step.
+
+.. threat:: Base record and import scope wording untestable
+   :id: THREAT-SDD-SKILLS-021
+   :status: noted
+   :stride: T
+   :c4_scope: security_review
+   :decided_by: operator
+   :run: 87708f1a
+   :mitigation: Implementation: base field on each review record; effective base is the latest operator-decided re-record, else the first; imports means repository modules.
+   :links: REQ-SECURITY-REVIEW-011, REQ-SECURITY-REVIEW-006
+
+   The base sits in prose, not a record field; the effective base after a re-record is undefined; 'modules it imports' is unscoped. Noted 2026-11-22 (narrow check, SD4-04) under the operator's policy for this step.

@@ -151,3 +151,21 @@ Decisions
 - Noted: THREAT-SDD-SKILLS-015 (bootstrap gate script), -016
   (non-interactive detection), -017 (process-threat evidence).
 
+Design-Time Security Gate (narrow check after reset 3)
+------------------------------------------------------
+
+**Agent**: Narrow check of the reset-3 edits. SD3-02 closed; SD3-01 has a
+remaining gap fixable in implementation. Four findings, none critical: the
+append-only test does not protect records created during the run (SD4-01);
+forged edits can hide in legitimate protected-path changes (SD4-02); bd and
+design-log commits break the post check (SD4-03); untestable wording around
+the stored base and import scope (SD4-04). Conclusion: planning may proceed.
+
+Decisions
+~~~~~~~~~
+
+- Per the operator's policy for this step, all four recorded as noted
+  (THREAT-SDD-SKILLS-018..021). SD4-01 and SD4-02 become explicit acceptance
+  checks in the plan.
+- Design gate passed; the run advances to plan.
+

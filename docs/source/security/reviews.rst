@@ -36,4 +36,10 @@ FEAT-OPERATOR-EDU, so not the merge-base with main).
      - d076b52..9c75ae6
      - 7 (SD3-01..07)
      - 01, 02 added, 03, 05 folded in; reset 3; 04, 06, 07 noted
+   * - 87708f1a
+     - design
+     - 4 (narrow)
+     - 9c75ae6..24fc00a
+     - 4 (SD4-01..04)
+     - SD3-02 closed; all four noted per policy; planning may proceed
 
