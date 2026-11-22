@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# [origin ref=llm-dsl-gu1y.13 req=REQ-OPERATOR-EDU-003 c4=sdd_skills/plan_skill]
-#   [intent]Render PlantUML sources to SVG for the Sphinx docs site or, with --dir, for every .puml under a directory, failing when a rendered SVG carries a PlantUML warning banner[/intent]
+# [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.13 req=REQ-OPERATOR-EDU-003 c4=sdd_skills/plan_skill]
+#   [intent]Render PlantUML sources to SVG for the Sphinx docs site or, with --dir, for every .puml under a directory, failing when a rendered SVG carries a PlantUML warning banner and stamping each --dir SVG with the sha256 of its source[/intent]
+#   [inv]Every SVG written by --dir carries exactly one sdd-source-sha256 comment equal to the sha256 of the .puml bytes it was rendered from; --docs-dir output carries none.[/inv]
 # [/origin]
 """Render all PlantUML source files in docs/source/architecture/diagrams/ to SVG.
 
@@ -9,8 +10,9 @@ Usage (from project root):
     python <skill-path>/scripts/generate_diagrams.py --dir learn
 
 With --dir, every .puml under the directory is rendered to an SVG next to its
-source, and the run fails if any SVG carries a PlantUML warning or deprecation
-banner.
+source, the SVG is stamped with `<!-- sdd-source-sha256: <hex> -->` (the sha256
+of the source bytes, which lesson_library checks), and the run fails if any SVG
+carries a PlantUML warning or deprecation banner.
 
 PlantUML is resolved in order:
   1. PLANTUML_JAR env var (explicit path to .jar)
@@ -19,6 +21,7 @@ PlantUML is resolved in order:
 """
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -69,8 +72,27 @@ def svg_warnings(svg_path: Path) -> list[str]:
     return [txt for txt in texts if any(rx.search(txt) for rx in WARNING_MARKERS)]
 
 
+def stamp_svg(svg_path: Path, source_bytes: bytes) -> None:
+    """Insert `<!-- sdd-source-sha256: <hex> -->` into a rendered SVG.
+
+    The comment goes right after the XML declaration when there is one, otherwise
+    at the very start. Both are legal places for a comment in an XML document, so
+    the SVG stays valid and renders the same in a browser.
+    """
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    comment = f"<!-- sdd-source-sha256: {digest} -->"
+    text = svg_path.read_bytes().decode("utf-8")
+    decl = re.match(r"\s*<\?xml[^>]*\?>", text)
+    if decl:
+        new = text[: decl.end()] + "\n" + comment + "\n" + text[decl.end():]
+    else:
+        new = comment + "\n" + text
+    svg_path.write_bytes(new.encode("utf-8"))
+
+
 def render_file(puml_path: Path, plantuml_cmd: list[str], strict: bool = False) -> bool:
     svg_path = puml_path.with_suffix(".svg")
+    source_bytes = puml_path.read_bytes()
     cmd = plantuml_cmd + ["-tsvg", "-o", str(puml_path.parent.resolve()), str(puml_path.resolve())]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -84,6 +106,7 @@ def render_file(puml_path: Path, plantuml_cmd: list[str], strict: bool = False) 
         print(f"         expected {svg_path.name} next to source; name the @startuml block after the file stem")
         return False
     if strict:
+        stamp_svg(svg_path, source_bytes)
         warns = svg_warnings(svg_path)
         if warns:
             print(f"  ERROR  {puml_path}")

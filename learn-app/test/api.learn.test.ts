@@ -1,11 +1,11 @@
-// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.5 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.5,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-005,REQ-OPERATOR-EDU-007,REQ-OPERATOR-EDU-010 c4=learn_app/learn_server]
 //   [intent]Exercises /api/now, learner, tree, next, lesson and asset against the seed lessons, and the real bundled server creating learner.json.[/intent]
 // [/origin]
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { makeApp } from './helpers/app.js';
-import { REPO, makeProject, startLearnServer } from './helpers/server.js';
+import { copyLearn, makeProject, startLearnServer } from './helpers/server.js';
 import { tmp as tmpDir } from './helpers/tmp.js';
 
 const tmp = (): string => tmpDir('learn-api-');
@@ -13,7 +13,7 @@ const tmp = (): string => tmpDir('learn-api-');
 function fixture(learner?: object, now?: object) {
   const project = tmp();
   const home = tmp();
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true });
+  copyLearn(project, { domains: ['backend'] });
   if (now) {
     mkdirSync(join(project, '.sdd'));
     writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify(now));

@@ -1,0 +1,2 @@
+title: Threat modeling
+summary: How to name what can go wrong in a system, where trust changes hands, and how each threat is answered by a mitigation and a test.

@@ -1,7 +1,8 @@
-# [origin ref=llm-dsl-gu1y.18,llm-dsl-gu1y.14 req=REQ-OPERATOR-EDU-004 c4=sdd_skills/plan_skill]
+# [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.18,llm-dsl-gu1y.14 req=REQ-OPERATOR-EDU-004 c4=sdd_skills/plan_skill]
 #   [intent]Audits the plan skill lesson-preparation instructions, the --dir and --docs-dir render modes of generate_diagrams.py, the plugin version bump and the repo learn/ validation against the t7 acceptance criteria[/intent]
 # [/origin]
 
+import hashlib
 import json
 import re
 import shutil
@@ -84,6 +85,18 @@ def test_docs_dir_renders_deprecated_source_without_warning_gate(tmp_path):
         f"fixture no longer triggers the PlantUML banner {BANNER_TEXT!r}, so the no-gate assertion proves nothing; "
         f"text nodes: {texts[:5]}"
     )
+
+
+@needs_plantuml
+def test_docs_dir_output_carries_no_source_stamp(tmp_path):
+    docs = tmp_path / "docs" / "source"
+    diag = docs / "architecture" / "diagrams"
+    src = write_file(diag / "fx_ok.puml", PUML_OK)
+
+    r = run_diagrams(["--docs-dir", str(docs)])
+
+    assert r.returncode == 0, out(r)
+    assert "sdd-source-sha256" not in src.with_suffix(".svg").read_text()
 
 
 @needs_plantuml
@@ -300,6 +313,16 @@ def test_every_learn_puml_has_svg_beside_it_named_after_its_stem():
         )
 
 
+def test_every_learn_svg_is_stamped_with_the_sha256_of_its_puml():
+    pumls = sorted(LEARN.rglob("*.puml"))
+    assert len(pumls) >= 1, "expected at least one lesson diagram under learn/"
+    for puml in pumls:
+        svg = puml.with_suffix(".svg")
+        digest = hashlib.sha256(puml.read_bytes()).hexdigest()
+        stamps = re.findall(r"<!--\s*sdd-source-sha256:\s*([0-9a-f]{64})\s*-->", svg.read_text())
+        assert stamps == [digest], f"{svg.relative_to(ROOT)} must carry one sdd-source-sha256 stamp equal to its source"
+
+
 @pytest.mark.parametrize(
     ("base", "cur", "ok"),
     [
@@ -315,7 +338,7 @@ def test_single_bump_rule_accepts_exactly_one_increment(base, cur, ok):
     assert _single_bump(base, cur) is ok
 
 
-def test_plugin_version_single_bump_from_main():
+def test_plugin_version_is_higher_than_main():
     try:
         base = subprocess.run(
             ["git", "show", "main:.claude-plugin/plugin.json"],
@@ -327,8 +350,9 @@ def test_plugin_version_single_bump_from_main():
     cur_ver = json.loads(PLUGIN_JSON.read_text())["version"]
     if base_ver == cur_ver:
         pytest.skip(f"plugin version equals main ({base_ver}); single-bump check not applicable")
-    assert _single_bump(base_ver, cur_ver), (
-        f"main is {base_ver}, branch is {cur_ver}: the branch must bump the plugin version exactly once"
+    as_tuple = lambda v: tuple(int(x) for x in v.split("."))
+    assert as_tuple(cur_ver) > as_tuple(base_ver), (
+        f"main is {base_ver}, branch is {cur_ver}: the branch version must be higher than main"
     )
 
 

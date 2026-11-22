@@ -1,6 +1,8 @@
-// [origin ref=llm-dsl-gu1y.17 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
-//   [intent]Shared fixture builders for lesson library tests: temp projects from a file map, index.yaml and lesson Markdown text, and the two-lesson IAC tree.[/intent]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+//   [intent]Shared fixture builders for lesson library tests: temp projects from a file map, index.yaml and lesson Markdown text, the two-lesson IAC tree, and SVG fixtures stamped with the sdd-source-sha256 of their source.[/intent]
+//   [inv]stampedSvg stamps exactly the sha256 of the source text it is given, in the comment form generate_diagrams.py writes.[/inv]
 // [/origin]
+import { createHash } from 'node:crypto';
 import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmp } from './tmp.js';
@@ -15,8 +17,15 @@ export function makeLibProject(files: Record<string, string>): string {
   return root;
 }
 
+/** Sets a file's mtime. Used only to prove that mtimes do not influence diagram validation. */
 export function setMtime(root: string, rel: string, when: Date): void {
   utimesSync(join(root, rel), when, when);
+}
+
+/** An SVG body carrying the stamp that generate_diagrams.py writes for `source`. */
+export function stampedSvg(source: string, body = '<svg xmlns="http://www.w3.org/2000/svg"/>'): string {
+  const digest = createHash('sha256').update(source).digest('hex');
+  return `<!-- sdd-source-sha256: ${digest} -->\n${body}`;
 }
 
 export const INDEX = (title: string) => `title: ${title}\nsummary: Summary of ${title}.\n`;

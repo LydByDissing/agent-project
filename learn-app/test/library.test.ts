@@ -1,12 +1,13 @@
-// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.3,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Verifies the lesson library loader and `learn validate` against fixture trees and the real seed learn/ directory.[/intent]
 //   [inv]Every validation rule has a failing fixture and a passing positive control.[/inv]
 // [/origin]
-import { dirname, resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { LibraryError, loadLibrary } from '../src/library/load.js';
-import { IAC, INDEX, lessonMd, makeLibProject, setMtime } from './helpers/library.js';
+import { IAC, INDEX, lessonMd, makeLibProject, setMtime, stampedSvg } from './helpers/library.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -211,15 +212,37 @@ describe('loadLibrary: diagrams (REQ-OPERATOR-EDU-003)', () => {
     );
   });
 
-  it('rejects a referenced SVG that is older than its .puml source', () => {
+  it('rejects a referenced SVG that has no sdd-source-sha256 stamp', () => {
     const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': '<svg/>' }));
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-01-01T00:00:00Z'));
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-06-01T00:00:00Z'));
-    expectIssue(() => loadLibrary(root), 'diagrams/state-flow.svg is older than its source diagrams/state-flow.puml');
+    expectIssue(
+      () => loadLibrary(root),
+      'learn/iac/terraform-state/01-what-state-is.md',
+      'diagrams/state-flow.svg has no sdd-source-sha256 stamp',
+    );
   });
 
-  it('accepts a referenced SVG that is newer than its source (positive control)', () => {
-    const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': '<svg/>' }));
+  it('rejects a referenced SVG whose stamp is a hash of different bytes', () => {
+    const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg('@startuml\n@enduml\n!other\n') }));
+    expectIssue(() => loadLibrary(root), 'diagrams/state-flow.svg is out of date');
+  });
+
+  it('rejects a stamped SVG after one byte of its source changes', () => {
+    const original = '@startuml\n@enduml\n';
+    const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg(original) }));
+    expect(loadLibrary(root).lessons).toHaveLength(2);
+    writeFileSync(join(root, 'learn/iac/terraform-state/diagrams/state-flow.puml'), '@startuml\n@enduml\n ');
+    expectIssue(() => loadLibrary(root), 'diagrams/state-flow.svg is out of date');
+  });
+
+  it('accepts a stamped SVG whose mtime is older than its source (mtimes are ignored)', () => {
+    const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg('@startuml\n@enduml\n') }));
+    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-01-01T00:00:00Z'));
+    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-06-01T00:00:00Z'));
+    expect(loadLibrary(root).lessons).toHaveLength(2);
+  });
+
+  it('accepts a stamped SVG whose mtime is newer than its source (positive control)', () => {
+    const root = makeProject(withDiagram({ 'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg('@startuml\n@enduml\n') }));
     setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-01-01T00:00:00Z'));
     setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-06-01T00:00:00Z'));
     expect(loadLibrary(root).lessons).toHaveLength(2);
@@ -307,11 +330,13 @@ describe('loadLibrary: structure and front matter', () => {
 describe('seed learn/ in this repo', () => {
   it('passes validation', () => {
     const lib = loadLibrary(REPO);
-    expect(lib.domains.map((d) => d.id)).toEqual(['backend']);
+    expect(lib.domains.map((d) => d.id)).toEqual(['backend', 'security']);
     expect(lib.domains[0].topics.map((t) => t.id)).toEqual(['backend/http-caching']);
+    expect(lib.domains[1].topics.map((t) => t.id)).toEqual(['security/threat-modeling']);
     expect(lib.lessons.map((l) => l.id)).toEqual([
       'backend/http-caching/01-freshness',
       'backend/http-caching/02-revalidation',
+      'security/threat-modeling/01-stride',
     ]);
     expect(lib.lessons[1].diagrams).toEqual(['revalidation']);
     expect(lib.edges).toEqual([{ from: 'backend/http-caching/02-revalidation', to: 'backend/http-caching/01-freshness' }]);

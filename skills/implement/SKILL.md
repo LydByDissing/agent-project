@@ -75,11 +75,12 @@ If it does not, fix the code before writing the result.
 ### 6. Write result
 
 ```bash
-bd update <bd_id> --body-file - << 'DSL'
+bd update <bd_id> --append-notes "$(cat <<'DSL'
 [result id=<task_id> s=ok|fail|blocked]
 [artifact path=<path> a=new|mod|del n=<lines>]
 [/result]
 DSL
+)"
 ```
 
 ### 7. Close
@@ -148,7 +149,7 @@ conductor will surface this to sdd, which will escalate to the user.
 ### 6. Write result
 
 ```bash
-bd update <bd_id> --body-file - << 'DSL'
+bd update <bd_id> --append-notes "$(cat <<'DSL'
 [result id=<task_id> s=ok|fail|blocked]
 [artifact path=<path> a=new|mod|del n=<lines>]
 [suite t=<total> p=<pass> f=<fail>]
@@ -156,6 +157,7 @@ bd update <bd_id> --body-file - << 'DSL'
 [/suite]
 [/result]
 DSL
+)"
 ```
 
 List only failing tests inside `[suite]`. Pass count lives in `f=`.
@@ -208,12 +210,13 @@ Flag any violation. Do not read the full ADR corpus.
 ### 5. Write result
 
 ```bash
-bd update <bd_id> --body-file - << 'DSL'
+bd update <bd_id> --append-notes "$(cat <<'DSL'
 [result id=<task_id> s=ok|fail]
 [verdict approve|request-changes|block]
 [note sev=crit|major|minor|info at=<file>:<line>]<text>[/note]
 [/result]
 DSL
+)"
 ```
 
 Use `block` only for security issues or correctness failures that cannot

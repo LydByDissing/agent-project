@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-l3a,llm-dsl-0p1 req=REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004 c4=sdd_skills/plan_skill]
+# [origin ref=llm-dsl-l3a,llm-dsl-0p1,llm-dsl-2zv1.13 req=REQ-TRACER-BULLETS-001,REQ-TRACER-BULLETS-002,REQ-TRACER-BULLETS-003,REQ-TRACER-BULLETS-004,REQ-SECURITY-REVIEW-006,REQ-SECURITY-REVIEW-003 c4=sdd_skills/plan_skill]
 #   [intent]Shared reference documentation for DSL format, code style, model selection, and testing rules across all SDD pipeline roles[/intent]
 # [/origin]
 
@@ -12,8 +12,9 @@ Read only the sections relevant to your role:
 | tester | [origin] Header, DSL → Result format, Test Requirements row in table |
 | reviewer | DSL → Result format, bd Commands |
 | conductor | DSL → Exec + Synthesis formats, bd Commands |
-| plan | DSL → Task format, Model Selection, bd Commands |
+| plan | DSL → Task format, Model Selection, Protected set, bd Commands |
 | arch-review | DSL → Result format, [origin] Header, bd Commands |
+| security-review | Protected set, [security] block, Review exclusions |
 
 Every role also reads `skills/rules/CODEGRAPH.md` — how to query the project's
 code graph instead of grepping for structural facts.
@@ -49,9 +50,47 @@ passed while production migrations failed — we test against real data stores.
 | reviewer | sonnet | opus: auth, payments, data migration, public API surface changes |
 | tester | haiku | sonnet: if test coverage is inadequate in practice |
 | arch-review | sonnet | opus: major architectural decisions, compliance-sensitive changes |
+| security | opus | none (analysis agent `security-analyst`; fixed at opus) |
 
 Model is encoded in the `[exec]` block `[job model=...]`. Conductor reads and applies it;
 no heuristics in the executor.
+
+---
+
+## Protected set
+
+Paths whose change after the design review needs an explicit operator decision
+at the post security review. The security gate script reads this list; one
+glob per backticked token, nothing else in this section may use backticks.
+
+- `scripts/security_gate_lib.py`
+- `scripts/security_gate.py`
+- `tests/test_security_gate*.py`
+- `tests/test_*append_only*.py`
+- `hooks/**`
+- `.claude-plugin/**`
+- `mcp-servers.json`
+- `tests/conftest.py`
+- `pyproject.toml`
+- `pytest.ini`
+- `setup.cfg`
+- `tox.ini`
+- `docs/source/conf.py`
+- `agents/**`
+- `skills/**`
+- `.claude/**`
+- `docs/source/security/**`
+
+Changing this section is itself a change under the skills tree, so it is covered.
+
+---
+
+## Review exclusions
+
+Default paths left out of the security-review diff and reported as not reviewed:
+lockfiles (*.lock, package-lock.json, poetry.lock), *.svg, *.png,
+dist/, node_modules/, vendored code, generated bundles such as
+learn-app/server.js, learn-app/cli.js and learn-app/dist/.
 
 ---
 
@@ -285,6 +324,17 @@ the invention becomes an unrecorded decision nobody reviews.
 ```
 
 `s=reset` means at least one worker emitted `[new-req]`. `sdd` must bounce to docs.
+
+### Security (security-review → bd, advisory)
+
+```
+[security run=<run_id> feat=<feat-id> stage=design|post review=<n>]
+[threat id=THREAT-XXX-NNN sev=crit|high|med|low s=open|mitigated|accepted|noted]
+[/security]
+```
+
+Advisory only: the committed review record in `docs/source/security/reviews.rst`
+and `security_gate.py check` are authoritative, never this block.
 
 ### Attribute quick-ref
 

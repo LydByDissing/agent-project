@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.9 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.9,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_server]
 //   [intent]Verifies GET/PUT /api/interest round-trips through learner.json, rejects bad keys and values without writing, makes a skipped topic disappear from selection, lets topic settings override domain settings, and routes an empty interest map to onboarding in the built SPA.[/intent]
 //   [inv]A PUT that fails validation leaves learner.json byte-identical or absent; no test reaches the real claude binary.[/inv]
 // [/origin]
@@ -24,7 +24,7 @@ afterAll(() => {
 });
 
 function fixture(learner?: object) {
-  const { project, home } = makeProject({ tls: true, learner });
+  const { project, home } = makeProject({ tls: true, learner, domains: ['backend'] });
   const app = makeApp({
     project,
     distDir: project,

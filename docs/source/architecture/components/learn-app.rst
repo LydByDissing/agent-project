@@ -61,8 +61,8 @@ Lesson Library (``lesson_library``)
 **Responsibility**: Load ``learn/<domain>/<topic>/<NN>-<slug>.md`` and the
 ``index.yaml`` files into a typed tree, and validate it: required front
 matter, at least one source per lesson, ``requires`` pointing to existing
-lessons, no prerequisite cycles, referenced SVGs present and newer than
-their source. Also exposed as the ``learn validate`` CLI used by the Plan
+lessons, no prerequisite cycles, referenced SVGs present and stamped with
+the sha256 of their current source. Also exposed as the ``learn validate`` CLI used by the Plan
 Skill and CI.
 
 **Does NOT**: Pick lessons or render Markdown to HTML (the SPA does).

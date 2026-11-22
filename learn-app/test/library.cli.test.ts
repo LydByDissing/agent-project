@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.4 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.4,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Runs the bundled learn-app/cli.js as a child process to verify `learn validate` exit codes and named problems, and checks that no docs/source file includes or links into learn/.[/intent]
 // [/origin]
 import { spawnSync } from 'node:child_process';
@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { IAC, INDEX, lessonMd, makeLibProject, setMtime } from './helpers/library.js';
+import { IAC, INDEX, lessonMd, makeLibProject, setMtime, stampedSvg } from './helpers/library.js';
 
 const LEARN_APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = resolve(LEARN_APP, '..');
@@ -136,34 +136,50 @@ describe('learn validate (bundled cli.js): exit codes and named problems', () =>
     expect(problems[0]).toContain('diagrams/state-flow.svg, which is missing');
   });
 
-  it('exits 1 and names the lesson file when a referenced SVG is older than its .puml source', () => {
+  it('exits 1 and names the lesson file when a referenced SVG has no sdd-source-sha256 stamp', () => {
     const body = 'See the flow: ![flow](diagrams/state-flow.svg)';
-    const root = makeProject({
-      ...IAC,
-      'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { body }),
-      'learn/iac/terraform-state/diagrams/state-flow.puml': '@startuml\n@enduml\n',
-      'learn/iac/terraform-state/diagrams/state-flow.svg': '<svg/>',
-    });
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-01-01T00:00:00Z'));
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-06-01T00:00:00Z'));
-    const run = validate(root);
+    const run = validate(
+      makeProject({
+        ...IAC,
+        'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { body }),
+        'learn/iac/terraform-state/diagrams/state-flow.puml': '@startuml\n@enduml\n',
+        'learn/iac/terraform-state/diagrams/state-flow.svg': '<svg/>',
+      }),
+    );
     expect(run.code).toBe(1);
     const problems = problemLines(run);
     expect(problems).toHaveLength(1);
     expect(namedFile(problems[0])).toBe('learn/iac/terraform-state/01-what-state-is.md');
-    expect(problems[0]).toContain('diagrams/state-flow.svg is older than its source diagrams/state-flow.puml');
+    expect(problems[0]).toContain('diagrams/state-flow.svg has no sdd-source-sha256 stamp');
   });
 
-  it('exits 0 when a referenced SVG is newer than its .puml source (positive control)', () => {
+  it('exits 1 and names the lesson file when the stamp no longer matches the .puml source', () => {
+    const body = 'See the flow: ![flow](diagrams/state-flow.svg)';
+    const run = validate(
+      makeProject({
+        ...IAC,
+        'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { body }),
+        'learn/iac/terraform-state/diagrams/state-flow.puml': '@startuml\n@enduml\n',
+        'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg('@startuml\n@enduml\nold\n'),
+      }),
+    );
+    expect(run.code).toBe(1);
+    const problems = problemLines(run);
+    expect(problems).toHaveLength(1);
+    expect(namedFile(problems[0])).toBe('learn/iac/terraform-state/01-what-state-is.md');
+    expect(problems[0]).toContain('diagrams/state-flow.svg is out of date');
+  });
+
+  it('exits 0 when the stamp matches and the SVG is older than its .puml source (mtimes ignored)', () => {
     const body = 'See the flow: ![flow](diagrams/state-flow.svg)';
     const root = makeProject({
       ...IAC,
       'learn/iac/terraform-state/01-what-state-is.md': lesson('iac/terraform-state/01-what-state-is', { body }),
       'learn/iac/terraform-state/diagrams/state-flow.puml': '@startuml\n@enduml\n',
-      'learn/iac/terraform-state/diagrams/state-flow.svg': '<svg/>',
+      'learn/iac/terraform-state/diagrams/state-flow.svg': stampedSvg('@startuml\n@enduml\n'),
     });
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-01-01T00:00:00Z'));
-    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-06-01T00:00:00Z'));
+    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.svg', new Date('2026-01-01T00:00:00Z'));
+    setMtime(root, 'learn/iac/terraform-state/diagrams/state-flow.puml', new Date('2026-06-01T00:00:00Z'));
     const run = validate(root);
     expect(run.code).toBe(0);
     expect(run.stdout).toEqual(['learn OK: 1 domains, 1 topics, 2 lessons, 1 prerequisite edges']);
@@ -206,7 +222,7 @@ describe('learn validate (bundled cli.js): the repo seed', () => {
   it('exits 0 for the repo learn/ with the expected tree summary', () => {
     const run = validate(REPO);
     expect(run.code).toBe(0);
-    expect(run.stdout).toEqual(['learn OK: 1 domains, 1 topics, 2 lessons, 1 prerequisite edges']);
+    expect(run.stdout).toEqual(['learn OK: 2 domains, 2 topics, 3 lessons, 1 prerequisite edges']);
     expect(run.stderr).toEqual([]);
   });
 });
