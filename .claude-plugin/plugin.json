@@ -6,7 +6,7 @@
     "email": "tue@somersault.dk"
   },
   "license": "Apache-2.0",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "mcpServers": "./mcp-servers.json",
   "hooks": "./hooks/hooks.json"
 }

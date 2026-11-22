@@ -1,4 +1,4 @@
-<!-- [origin ref=llm-dsl-yms.3,llm-dsl-2zv1.13 req=REQ-GITHUB-ISSUES-002,REQ-GITHUB-ISSUES-003,REQ-SECURITY-REVIEW-006,REQ-SECURITY-REVIEW-003 c4=sdd_skills/sdd_orchestrator]
+<!-- [origin ref=llm-dsl-yms.3,llm-dsl-2zv1.13,llm-dsl-2zv1.17 req=REQ-GITHUB-ISSUES-002,REQ-GITHUB-ISSUES-003,REQ-SECURITY-REVIEW-006,REQ-SECURITY-REVIEW-003 c4=sdd_skills/sdd_orchestrator]
   [intent]Entry point for Spec-Driven Development pipeline; orchestrates docs, security-design, plan, implement, arch-review, and security-review phases with support for GitHub issue integration.[/intent]
 [/origin] -->
 
@@ -112,10 +112,33 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security_gate.py" check --feature FEAT-XX
 - before every `bd close` of the epic (`--stage post`);
 - live, when the move happens, and again on resume (see Crash Recovery).
 
+Every call site below runs it as described in "Running the gate check".
+
 Exit 0 is required. On non-zero, show the error lines, do not move the phase and
 do not close. Never bypass it. If the epic was closed while the post check fails,
 reopen it (`bd reopen $EPIC_ID`), set `phase=security-review`, and re-run the
 security-review phase.
+
+#### Running the gate check
+
+The orchestrator, not the script, decides whether the base copy of the gate must
+also run. For each `check`:
+
+1. Run `base-path` first:
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security_gate.py" base-path --epic $EPIC_ID --repo "$CLAUDE_PROJECT_DIR"`.
+   It prints `base=<sha>`, `security_gate.py=<same|differs|absent>` and
+   `security_gate_lib.py=<same|differs|absent>`.
+2. Run the HEAD `check` (command above, `--repo "$CLAUDE_PROJECT_DIR"`); exit 0 is required.
+3. If either gate file is `differs`: create a throwaway worktree at the base
+   (`WT=$(mktemp -d); git worktree add "$WT" <base>`), run
+   `python3 -I "$WT/scripts/security_gate.py" check <same arguments> --repo "$CLAUDE_PROJECT_DIR"`,
+   and remove the worktree (`git worktree remove --force "$WT"`), also when the run
+   fails. Exit 0 from that base run is required as well as from the HEAD run.
+4. If a gate file is `absent` at the base: show the mandatory notice
+   "gate script unverified (bootstrap)" to the operator at the gate; the check
+   cannot prove the script itself.
+
+Only when every required run exits 0 is the check passed.
 
 ---
 
@@ -259,7 +282,7 @@ If `signal=reset`:
 - Pass the "add requirement" findings to the docs phase as the first new requirements
 
 If `signal=advance`:
-- Run the security gate check (`--stage design`); it must exit 0
+- Run the security gate check (`--stage design`, see Running the gate check); it must exit 0
 - Remove `phase=security-design`, add `phase=plan`
 - Advance to plan phase
 
@@ -353,7 +376,7 @@ If `s=partial` or `s=fail`:
 - Ask user: fix and re-run, or reset to plan?
 - Fix and re-run: stay at `phase=implement` and re-invoke the conductor.
 - Reset to plan: `bd label remove $EPIC_ID phase=implement`, then run the
-  security gate check (`--stage design`), then `bd label add $EPIC_ID phase=plan`
+  security gate check (`--stage design`, see Running the gate check), then `bd label add $EPIC_ID phase=plan`
   and re-run the plan phase.
 
 ---
@@ -383,6 +406,9 @@ Read the arch-review result:
 
 If `s=approved`:
 - Arch-review does NOT close the epic or mark requirements implemented.
+- Mark the feature's requirements `status=implemented` in docs (RST status edits) and
+  commit it now, before the security-review phase starts, so its final
+  review/gate commit, post tree hash and post-head binding include this edit.
 - Remove `phase=arch-review`, add `phase=security-review`
 - Advance to security-review phase
 
@@ -421,10 +447,9 @@ If `signal=reset` ("revise docs" or an added requirement):
 If `signal=stopped`: stay in `phase=security-review` and report to the user.
 
 If `signal=advance`:
-- Run the security gate check (`--stage post`); it must exit 0
+- Run the security gate check (`--stage post`, see Running the gate check); it must exit 0
 - Remove `phase=security-review`, add `phase=done`
-- Run the check again immediately before `bd close $EPIC_ID`, then close the epic
-- Mark the feature's requirements `status=implemented` in docs
+- Run the check again (see Running the gate check) immediately before `bd close $EPIC_ID`, then close the epic; no docs edit happens after the close
 - Report completion to user
 
 ---
@@ -486,7 +511,9 @@ the epic is at `phase=plan`, `phase=implement` or `phase=arch-review` (the
 design gate must have passed for any of them), `--stage post` at
 `phase=security-review` or `phase=done`. At `phase=docs` or
 `phase=security-design` no gate has passed yet, so run the security-design
-phase rather than a check, and never skip it because an earlier run passed. If the epic is closed but
+phase rather than a check, and never skip it because an earlier run passed.
+The design-stage hash is taken at the design record's head commit, so `--stage design`
+at plan, implement or arch-review does not deadlock on later commits. If the epic is closed but
 the post check fails, reopen it and set `phase=security-review`.
 
 Re-invoke from the implement phase — the conductor will re-read open issues

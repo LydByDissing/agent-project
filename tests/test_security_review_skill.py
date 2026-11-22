@@ -322,5 +322,5 @@ def test_flag_checker_negative_control():
 def test_frontmatter_and_origin():
     t = text()
     assert t.startswith("---\nname: security-review\n")
-    assert re.search(r"<!-- \[origin ref=llm-dsl-2zv1\.11 .*c4=sdd_skills/security_review\]", t)
+    assert re.search(r"<!-- \[origin ref=llm-dsl-2zv1\.11(?:,[\w.-]+)* .*c4=sdd_skills/security_review\]", t)
     assert "[/origin] -->" in t

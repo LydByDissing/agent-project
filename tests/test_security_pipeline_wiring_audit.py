@@ -192,9 +192,9 @@ def test_done_path_checks_before_phase_and_close():
 
 
 def test_neg_done_path_without_check():
-    t = sdd().replace("- Run the security gate check (`--stage post`); it must exit 0\n", "")
+    t = sdd().replace("- Run the security gate check (`--stage post`, see Running the gate check); it must exit 0\n", "")
     assert not done_path_ok(t)
-    t = sdd().replace("- Run the check again immediately before `bd close $EPIC_ID`, then close the epic", "- bd close $EPIC_ID")
+    t = sdd().replace("- Run the check again (see Running the gate check) immediately before `bd close $EPIC_ID`, then close the epic; no docs edit happens after the close", "- bd close $EPIC_ID")
     assert not done_path_ok(t)
 
 

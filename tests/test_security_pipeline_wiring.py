@@ -177,7 +177,7 @@ def test_readme_pipeline_and_security_section():
 
 
 def test_plugin_version_bumped():
-    assert json.loads(rd(".claude-plugin", "plugin.json"))["version"] == "2.3.3"
+    assert json.loads(rd(".claude-plugin", "plugin.json"))["version"] == "2.3.4"
 
 
 def test_conf_has_threat_fields():
@@ -237,3 +237,72 @@ def test_neg_gate_lib_ignores_unlisted_path(tmp_path):
     (tmp_path / "skills" / "rules").mkdir(parents=True)
     (tmp_path / "skills" / "rules" / "RULES.md").write_text("## Protected set\n- `a/**`\n")
     assert lib.protected_hits(tmp_path, ["b/x"]) == []
+
+
+# ---- llm-dsl-2zv1.17: base gate run, implemented-before-post, resume ----
+
+def gate_run_ok(t: str) -> bool:
+    s = sect(t, "Running the gate check", 4)
+    order = re.search(r"base-path.*?HEAD `check`", s, re.S)
+    differs = has(s, r"`differs`", r"git worktree add", r"python3 -I", r"git worktree remove --force",
+                  r"also when the run\s+fails", r"as well as from the HEAD run")
+    absent = has(s, r"`absent`", r"gate script unverified \(bootstrap\)", r"operator")
+    return bool(order and differs and absent)
+
+
+def call_sites_ref_ok(t: str) -> bool:
+    n = len(re.findall(r"Running the gate check", t))
+    return n >= 6 and all(
+        "Running the gate check" in sect(t, ph)[sect(t, ph).index("gate check"):]
+        for ph in ("Phase: security-design",))
+
+
+def implemented_order_ok(t: str) -> bool:
+    ar = sect(t, "Phase: arch-review")
+    sr = sect(t, "Phase: security-review")
+    return bool(re.search(r"`status=implemented`.*?before the security-review phase.*?add `phase=security-review`", ar, re.S)
+                and not re.search(r"status=implemented", sr.split("signal=advance", 1)[1])
+                and re.search(r"post tree hash", ar))
+
+
+def test_gate_run_base_path_then_base_worktree_and_bootstrap():
+    assert gate_run_ok(sdd())
+
+
+def test_gate_call_sites_reference_single_definition():
+    t = sdd()
+    assert call_sites_ref_ok(t)
+    assert t.count("git worktree add") == 1
+    sr = rd("skills", "security-review", "SKILL.md")
+    assert "Running the gate check" in sect(sr, "Step 13", 2)
+
+
+def test_implemented_marked_before_post_gate_never_after_close():
+    t = sdd()
+    assert implemented_order_ok(t)
+    sr = sect(t, "Phase: security-review")
+    assert sr.index("bd close $EPIC_ID") > sr.index("--stage post")
+    assert "status=implemented" not in sr[sr.index("bd close $EPIC_ID"):]
+    assert "status=implemented" not in sect(t, "Phase: done")
+
+
+def test_resume_notes_design_hash_at_record_head():
+    cr = sect(sdd(), "Crash Recovery", 2)
+    assert has(cr, r"design record's head commit", r"does not deadlock", r"--stage design", r"--stage post")
+
+
+def test_neg_gate_run_missing_pieces():
+    t = sdd()
+    assert gate_run_ok(t)
+    assert not gate_run_ok(t.replace("python3 -I", "python3"))
+    assert not gate_run_ok(t.replace("gate script unverified (bootstrap)", "n/a"))
+    assert not gate_run_ok(t.replace("`base-path` first", "x").replace("base-path", "x"))
+    assert not gate_run_ok(t.replace("git worktree remove --force", "rm -rf"))
+
+
+def test_neg_implemented_after_close_rejected():
+    t = sdd()
+    sr = sect(t, "Phase: security-review")
+    assert not implemented_order_ok(t.replace(sr, sr + "\n- Mark requirements `status=implemented`\n"))
+    ar = sect(t, "Phase: arch-review")
+    assert not implemented_order_ok(t.replace(ar, ar.replace("`status=implemented`", "`status=done`")))

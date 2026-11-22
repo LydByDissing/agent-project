@@ -10,7 +10,7 @@ description: >
   checks. Runs inline in the main agent. Called by the sdd skill.
 ---
 
-<!-- [origin ref=llm-dsl-2zv1.11 req=REQ-SECURITY-REVIEW-001,REQ-SECURITY-REVIEW-002,REQ-SECURITY-REVIEW-004,REQ-SECURITY-REVIEW-005,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-012 c4=sdd_skills/security_review]
+<!-- [origin ref=llm-dsl-2zv1.11,llm-dsl-2zv1.17 req=REQ-SECURITY-REVIEW-001,REQ-SECURITY-REVIEW-002,REQ-SECURITY-REVIEW-004,REQ-SECURITY-REVIEW-005,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-012 c4=sdd_skills/security_review]
   [intent]Runbook the main agent follows inline to run the security-design and security-review phases: scoped input, read-only analysis, operator gate, bounded fix loop and a script-checked review record.[/intent]
 [/origin] -->
 
@@ -136,9 +136,10 @@ finding "gate script unverified (bootstrap)" at **both** gates, and say the
 check cannot prove the script itself. `security_gate.py check` prints this
 line on its own in that case; show it, do not hide it.
 
-If the script is present at the base and HEAD changed it, the `check`
-subcommand re-runs the base version from a throwaway worktree with `python -I`
-by itself. Do not run an unverified HEAD copy in its place.
+If the script is present at the base and HEAD changed it (`base-path` prints
+`differs`), the orchestrator runs the base version from a throwaway worktree with
+`python -I`, as defined in the sdd skill's "Running the gate check". Do not run an
+unverified HEAD copy in its place.
 
 ---
 
@@ -579,13 +580,15 @@ Never put a secret or exploit detail in it (redact-check covers it); never use
 
 ## Step 13: Check, then advance or reset
 
-Run the check for the stage right before reporting the result:
+Run the check for the stage right before reporting the result, following the sdd
+skill's "Running the gate check" (`base-path` first, then the HEAD check, plus the
+base-worktree run when a gate file `differs`):
 
 ```bash
 python3 "$GATE" check --feature "$FEAT_ID" --stage "$STAGE" --epic "$EPIC_ID" --main main
 ```
 
-Exit 0 is required to advance. On a non-zero exit, show the error lines and
+Exit 0 is required to advance (from every run that section requires) to advance. On a non-zero exit, show the error lines and
 re-run the gate; do not advance and do not bypass.
 
 - `stage=design`: no "add requirement" decision and check ok: signal
