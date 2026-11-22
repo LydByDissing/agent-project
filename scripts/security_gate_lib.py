@@ -1,4 +1,4 @@
-# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.1,llm-dsl-2zv1.3,llm-dsl-2zv1.5,llm-dsl-2zv1.7,llm-dsl-2zv1.10 req=REQ-SECURITY-REVIEW-013,REQ-SECURITY-REVIEW-003,REQ-SECURITY-REVIEW-008,REQ-SECURITY-REVIEW-011,REQ-SECURITY-REVIEW-009,REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
 #   [intent]Parses threat, risk and review records and feature needs from the docs tree and validates analysis findings against them.[/intent]
 #   [inv]validate_findings returns one message per violated rule naming the finding id; it never raises on malformed finding fields.[/inv]
 #   [inv]redact_scan returns one message per likely credential naming file:line and type and never contains more than the first 4 characters of a match.[/inv]
@@ -17,6 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+TEXT_MAX = 400
 SEVERITIES = ("crit", "high", "med", "low")
 STRIDE_LETTERS = "STRIDE"
 FIELDS = ("id", "severity", "stride", "element", "anchor", "threat", "mitigation", "links")
@@ -193,6 +194,7 @@ def validate_findings(findings: list, data: dict, feat: str) -> list[str]:
             errs.append(f"finding {tag}: duplicate id")
         ids.add(tag)
         errs += [f"finding {tag}: missing field {k}" for k in FIELDS if k not in f]
+        errs += [f"finding {tag}: {k} longer than {TEXT_MAX} chars" for k in ("threat", "mitigation") if isinstance(f.get(k), str) and len(f[k]) > TEXT_MAX]
         sev = f.get("severity")
         if "severity" in f and sev not in SEVERITIES:
             errs.append(f"finding {tag}: severity {sev!r} not one of {'|'.join(SEVERITIES)}")

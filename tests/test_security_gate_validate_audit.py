@@ -496,3 +496,19 @@ def test_review_records_count_only_rows_starting_with_run_id(docs):
     r = cli(docs)
 
     assert "2 review records" in r.stdout
+
+
+def test_threat_or_mitigation_over_400_chars_is_rejected(tmp_path):
+    import json, subprocess, sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    base = {"id": "SD-01", "severity": "low", "stride": "T", "element": "security_review", "anchor": "x:1", "threat": "t", "mitigation": "m", "links": ["REQ-SECURITY-REVIEW-013"]}
+    for k in ("threat", "mitigation"):
+        f = tmp_path / f"{k}.json"
+        f.write_text(json.dumps([dict(base, **{k: "x" * 401})]))
+        r = subprocess.run([sys.executable, str(root / "scripts/security_gate.py"), "validate", "--feature", "FEAT-SECURITY-REVIEW", "--findings", str(f)], capture_output=True, text=True, cwd=root)
+        assert r.returncode == 1 and f"{k} longer than 400 chars" in r.stderr
+    ok = tmp_path / "ok.json"
+    ok.write_text(json.dumps([dict(base, threat="x" * 400, mitigation="y" * 400)]))
+    r = subprocess.run([sys.executable, str(root / "scripts/security_gate.py"), "validate", "--feature", "FEAT-SECURITY-REVIEW", "--findings", str(ok)], capture_output=True, text=True, cwd=root)
+    assert r.returncode == 0, r.stderr
