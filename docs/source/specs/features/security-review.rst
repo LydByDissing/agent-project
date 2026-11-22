@@ -3,7 +3,7 @@ Security Review — Design-Time and Post-Implementation
 
 .. feat:: Security Review — Design-Time and Post-Implementation
    :id: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
 
    Adds a security review to the SDD pipeline at two points. The first runs
    right after the operator approves the docs, before planning. It reviews
@@ -35,7 +35,7 @@ Requirements
 .. req:: Design-time security review runs after docs approval, before plan
    :id: REQ-SECURITY-REVIEW-001
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Security flaws found in the design cost a docs edit. Found
        after implementation, they cost code, tests and a fix loop. In this
        plugin, behaviour lives largely in SKILL.md prompts, so those are
@@ -62,7 +62,7 @@ Requirements
 .. req:: Operator decides every design-time finding; reset to docs on request
    :id: REQ-SECURITY-REVIEW-002
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: The operator owns the trade-off between risk and scope. No
        severity threshold triggers an automatic reset.
    :acceptance: Given design-time findings, when the gate is shown, then
@@ -90,7 +90,7 @@ Requirements
 .. req:: Threat model and accepted risks persisted in the docs site
    :id: REQ-SECURITY-REVIEW-003
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Each review should build on earlier ones. Accepted risks must
        be visible and traceable, not lost in a terminal session.
    :acceptance: Given a review, when it completes, then
@@ -122,7 +122,7 @@ Requirements
 .. req:: Post-implementation security review after arch-review approval
    :id: REQ-SECURITY-REVIEW-004
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Code can drift from a sound design. Mitigations promised in
        the spec must actually be implemented and tested, and an agent's claim
        that they are is not evidence (THREAT-SDD-SKILLS-006).
@@ -155,7 +155,7 @@ Requirements
 .. req:: Operator gate and bounded fix loop for post-implementation findings
    :id: REQ-SECURITY-REVIEW-005
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Same ownership as the design gate, with a fix path because
        code exists now. The fix worker's brief comes from finding text and
        must not be able to weaken the system it fixes
@@ -188,7 +188,7 @@ Requirements
 .. req:: Orchestrator enforces the security phases; they cannot be skipped
    :id: REQ-SECURITY-REVIEW-006
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Today arch-review closes the epic itself and ``phase=``
        labels only accumulate, so a security phase could be skipped by
        ordering or by any agent adding a label (THREAT-SDD-SKILLS-002).
@@ -230,7 +230,7 @@ Requirements
 .. req:: Analysis runs in a read-only sub-agent that treats content as data
    :id: REQ-SECURITY-REVIEW-007
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: The reviewed text (code, docs written from public issues,
        earlier threat pages) may contain injected instructions. The main
        context has shell, ``gh`` and bd write access, so analysis must not
@@ -261,7 +261,7 @@ Requirements
 .. req:: Gate decisions are script-checked, operator-only, and not trusted from bd
    :id: REQ-SECURITY-REVIEW-008
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: The agent that writes the findings also writes the gate
        summary, and bd notes are free text any agent can append to. Neither
        can be the proof that the operator decided (THREAT-SDD-SKILLS-003,
@@ -313,7 +313,7 @@ Requirements
 .. req:: Threat and risk records are append-only
    :id: REQ-SECURITY-REVIEW-009
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Later reviews and the docs skill both edit RST and could
        silently remove a threat, flip its status or rewrite a risk
        rationale (THREAT-SDD-SKILLS-005).
@@ -343,7 +343,7 @@ Requirements
 .. req:: Secrets and exploit detail are never published
    :id: REQ-SECURITY-REVIEW-010
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: The post-implementation review looks for secrets, and the
        natural way to report one would copy it into docs, bd notes or a
        GitHub comment, all of which get pushed (THREAT-SDD-SKILLS-007).
@@ -371,7 +371,7 @@ Requirements
 .. req:: Review input is scoped, budgeted and anchored to a base commit
    :id: REQ-SECURITY-REVIEW-011
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Raw diffs include generated, binary, lock and vendored files
        (run 87708f1a's docs diff was 182 KB, mostly one SVG), which wastes
        Opus spend and can silently exceed the context. "Since the run
@@ -403,7 +403,7 @@ Requirements
 .. req:: Re-reviews are incremental and loops are bounded
    :id: REQ-SECURITY-REVIEW-012
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Each re-review is a fresh, non-deterministic Opus run that can
        reword or add findings, and neither the reset loop nor the fix loop
        has a limit (THREAT-SDD-SKILLS-008).
@@ -424,7 +424,7 @@ Requirements
 .. req:: Findings are validated before the gate
    :id: REQ-SECURITY-REVIEW-013
    :links: FEAT-SECURITY-REVIEW
-   :status: approved
+   :status: implemented
    :rationale: Made-up C4 ids or broken REQ links would enter published
        needs and mislead later reviews (THREAT-SDD-SKILLS-012).
    :acceptance: Given the analysis sub-agent's findings, then
