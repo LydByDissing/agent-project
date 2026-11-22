@@ -9,6 +9,11 @@ column of a post record lists changed protected paths as ``path=accepted``
 requires a matching record before a phase can advance (REQ-SECURITY-REVIEW-008). Records before that script
 exists were made by hand and carry no tree hash.
 
+A ``rebase`` row re-records a run's base after a rebase. It counts only when
+committed and when its Outcome cell starts with ``decided_by=operator``.
+A post record counts only if its run + stage + review number did not exist
+before the commit that added it.
+
 Run 87708f1a base: ``a429fd8``, confirmed by the operator 2026-11-22 (HEAD when the epic was created; stacked on
 FEAT-OPERATOR-EDU, so not the merge-base with main).
 

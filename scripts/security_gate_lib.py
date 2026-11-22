@@ -142,6 +142,9 @@ def check_records(data: dict) -> list[str]:
             errs.append(f"{where}: duplicate id {nid} (first at {seen[nid]})")
         seen[nid] = where
         if n["type"] == "threat":
+            st = n["opts"].get("status")
+            if st is not None and st not in STATUSES:
+                errs.append(f"{where}: threat {nid} status {st!r} not one of {'|'.join(STATUSES)}")
             want = container_of(n["file"])
             if not re.fullmatch(rf"THREAT-{re.escape(want)}-\d{{3}}", nid):
                 errs.append(f"{where}: threat id {nid} must be THREAT-{want}-NNN")
@@ -339,6 +342,14 @@ def linked_threats(data: dict, feat: str) -> list[dict]:
     return [t for t in data["threats"] if set(split_ids(t["opts"].get("links", ""))) & reqs]
 
 
+RESOLVED = ("noted", "accepted", "mitigated")
+STATUSES = ("open",) + RESOLVED
+
+
+def is_open(t: dict) -> bool:
+    return t["opts"].get("status", "").strip().lower() not in RESOLVED
+
+
 def has_decision(t: dict, run: str) -> bool:
     return run in split_ids(t["opts"].get("run", "")) and "operator" in split_ids(t["opts"].get("decided_by", ""))
 
@@ -351,7 +362,8 @@ def added_rows(repo: Path) -> list[dict]:
     now = parse_reviews_text(git(repo, "show", f"{c}:{REVIEWS_REL}")[1])
     rc, prev = git(repo, "show", f"{c}~1:{REVIEWS_REL}")
     old = parse_reviews_text(prev) if rc == 0 else []
-    return [r for r in now if r not in old]
+    keys = {(r.get("run"), r.get("stage"), r.get("review")) for r in old}
+    return [r for r in now if (r.get("run"), r.get("stage"), r.get("review")) not in keys]
 
 
 def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main: str, epic: dict) -> tuple[list[str], str]:
@@ -376,7 +388,9 @@ def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main:
         errs.append(f"run {run}: first review record is not committed in {REVIEWS_REL}")
     elif not first:
         errs.append(f"run {run}: first review record (commit {commit[:8]}) has no base")
-    reb = [r for r in recs if r.get("stage") == "rebase" and "operator" in r.get("outcome", "").lower() and r.get("base")]
+    rc_h, txt_h = git(repo, "show", f"HEAD:{REVIEWS_REL}")
+    committed = [r for r in parse_reviews_text(txt_h) if r.get("run") == run] if rc_h == 0 else []
+    reb = [r for r in committed if r.get("stage") == "rebase" and r.get("outcome", "").startswith("decided_by=operator") and r.get("base")]
     eff = reb[-1]["base"] if reb else first
     base = rev(repo, eff) if eff else ""
     if eff and not base:
@@ -408,9 +422,9 @@ def run_check(repo: Path, docs: Path, feat: str, stage: str, epic_id: str, main:
             errs.append(f"tree sha256 differs from review record ({want[:12]} recorded, {tree_hash(repo, feat, run)[:12]} current)")
     lt = linked_threats(data, feat)
     if stage == "design":
-        errs += [f"threat {t['opts'].get('id')} is open without a decision for run {run}" for t in lt if t["opts"].get("status") == "open" and not has_decision(t, run)]
+        errs += [f"threat {t['opts'].get('id')} is open without a decision for run {run}" for t in lt if is_open(t) and not has_decision(t, run)]
     else:
-        errs += [f"threat {t['opts'].get('id')} is open" for t in lt if t["opts"].get("status") == "open"]
+        errs += [f"threat {t['opts'].get('id')} is open" for t in lt if is_open(t)]
     if stage == "post" and rec is not None and head:
         rh = rev(repo, rec_head(rec))
         if not rh:

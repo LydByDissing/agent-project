@@ -146,7 +146,7 @@ def test_stacked_base_on_top_of_merge_base_passes_after_main_moves(tmp_path):
 def test_forged_post_record_in_commit_not_latest_touching_reviews(tmp_path):
     r = post_with(tmp_path, "fp", "tests/conftest.py", "-")
     fails(chk(r, "post", r.base), "protected path tests/conftest.py changed")
-    rows = [row("design", r.base, r.base, r.tree()), row("post", r.base, r.i1, r.tree(), "tests/conftest.py=accepted " + SEC, "2")]
+    rows = [row("design", r.base, r.base, r.tree()), row("post", r.base, r.i1, r.tree(), "tests/conftest.py=accepted " + SEC, "3")]
     r.w(REV, table(rows))
     r.commit("worker forges the listing")
     ok(chk(r, "post", r.base))
@@ -355,7 +355,6 @@ def test_design_rule_does_not_apply_decision_exemption_to_post(tmp_path):
     fails(chk(r, "post", r.base), "is open")
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: check treats only the exact string open as open; other or missing status values hide an unresolved threat")
 @pytest.mark.parametrize("status", ["OPEN", "Open", "", "opened"])
 def test_threat_status_spelling_does_not_hide_open_threat(tmp_path, status):
     r = design_repo(tmp_path)

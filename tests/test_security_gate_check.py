@@ -253,7 +253,7 @@ def test_protected_set_read_from_rules_section(tmp_path):
     r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "-", "2")]))
     r.commit("post")
     fails(r.check("post", r.base), "protected path custom/x.txt changed")
-    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "custom/x.txt=accepted", "2")]))
+    r.w("docs/source/security/reviews.rst", table([row("design", r.base, r.base, r.tree()), row("post", r.base, i1, r.tree(), "-", "2"), row("post", r.base, i1, r.tree(), "custom/x.txt=accepted", "3")]))
     r.commit("list it")
     rc, out, err = r.check("post", r.base)
     assert "protected path custom/x.txt" not in err, err
@@ -348,7 +348,7 @@ def test_rebase_record_requires_operator_decision(tmp_path):
     r.w("docs/source/security/reviews.rst", table(rows))
     r.commit("rebase unconfirmed")
     fails(r.check("design", new), "differs from recorded base")
-    rows[1] = row("rebase", new, new, "", "", "2", outcome="operator decision 2026-11-22")
+    rows[1] = row("rebase", new, new, "", "", "2", outcome="decided_by=operator 2026-11-22")
     r.w("docs/source/security/reviews.rst", table(rows))
     r.commit("rebase confirmed")
     rc, out, err = r.check("design", new)
@@ -436,3 +436,40 @@ def test_real_repo_fails_with_bootstrap_state():
     res = subprocess.run([sys.executable, str(GATE), "check", "--stage", "design", "--feature", "FEAT-SECURITY-REVIEW", "--epic", "llm-dsl-2zv1"], capture_output=True, text=True, cwd=ROOT)
     assert res.returncode == 1
     assert "no tree hash" in res.stderr or "has no base" in res.stderr or "no review record" in res.stderr
+
+
+def test_validate_rejects_unknown_threat_status(tmp_path):
+    d = tmp_path / "docs"
+    (d / "security" / "threat-model").mkdir(parents=True)
+    f = d / "security" / "threat-model" / "my-box.rst"
+    for st, n in (("OPEN", 1), ("closed", 1), ("open", 0), ("mitigated", 0)):
+        f.write_text(threat(st))
+        errs = [e for e in lib.check_records(lib.load(d)) if "status" in e]
+        assert len(errs) == n, (st, errs)
+
+
+def test_rebase_row_only_from_committed_history(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    new = r.git("rev-parse", "HEAD")
+    rows = [row("design", r.base, r.base, r.tree()), row("rebase", new, new, "", "", "2", outcome="decided_by=operator")]
+    r.w("docs/source/security/reviews.rst", table(rows))
+    fails(r.check("design", new), "differs from recorded base")
+    r.commit("rebase committed")
+    assert r.check("design", new)[0] == 0
+
+
+def test_rebase_row_needs_structured_marker(tmp_path):
+    r = add_design(design_repo(tmp_path))
+    new = r.git("rev-parse", "HEAD")
+    rows = [row("design", r.base, r.base, r.tree()), row("rebase", new, new, "", "", "2", outcome="not decided_by=operator really")]
+    r.w("docs/source/security/reviews.rst", table(rows))
+    r.commit("substring")
+    fails(r.check("design", new), "differs from recorded base")
+
+
+def test_edited_post_row_is_not_added(tmp_path):
+    r = post_repo(tmp_path)
+    text = (r.p / "docs/source/security/reviews.rst").read_text()
+    r.w("docs/source/security/reviews.rst", text.replace("     - ok\n", "     - edited\n"))
+    r.commit("edit existing rows")
+    fails(r.check("post", r.base), "was not added by the latest commit touching reviews.rst")
