@@ -1,0 +1,32 @@
+@startuml components_learn_app
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Component Diagram: Learn App
+
+Person(dev, "Operator", "Developer driving /sdd")
+
+Container_Boundary(learn_app, "Learn App") {
+    Component(learn_spa, "Learn SPA", "Vite + TS", "Onboarding, lesson view,\nquiz, wave progress, settings")
+    Component(learn_server, "Learn Server", "Node + Hono", "Localhost JSON API, serves SPA,\nowns learner.json writes,\nLeitner mastery updates")
+    Component(lesson_library, "Lesson Library", "TS module", "Loads + validates learn/:\nfront matter, sources,\nprerequisites, SVG freshness")
+    Component(lesson_selector, "Lesson Selector", "TS module (pure)", "Picks next lesson from\nnow.json + interest + mastery")
+    Component(question_generator, "Question Generator", "TS module", "Builds prompt, runs claude -p,\nvalidates question schema")
+}
+
+ContainerDb(learn_lib, "Learn Library", "learn/", "")
+ContainerDb(learner_state, "Learner State", "~/.sdd/learner.json", "")
+ContainerDb(run_status, "Run Status", "<project>/.sdd/now.json", "")
+System_Ext(claude, "Claude Code CLI", "claude -p")
+
+Rel(dev, learn_spa, "Uses", "Browser")
+Rel(learn_spa, learn_server, "Calls", "HTTP JSON")
+Rel(learn_server, lesson_library, "Loads lessons")
+Rel(learn_server, lesson_selector, "Asks for next lesson")
+Rel(learn_server, question_generator, "Requests quiz")
+Rel(lesson_library, learn_lib, "Reads", "File I/O")
+Rel(learn_server, learner_state, "Reads/writes learner.json", "File I/O")
+Rel(learn_server, run_status, "Reads now.json", "File I/O")
+Rel(question_generator, claude, "Generates questions", "subprocess")
+
+SHOW_LEGEND()
+@enduml

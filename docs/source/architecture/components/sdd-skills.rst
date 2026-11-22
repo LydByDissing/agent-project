@@ -149,6 +149,9 @@ component mapping.
 - ``[task]`` DSL bodies in bd issues.
 - Dependency graph wiring between coder, tester, and reviewer tasks.
 - The ``[exec]`` block passed to Conductor.
+- ``topics=`` tags on each ``[exec]`` job, and creating or refreshing the
+  matching lessons in ``learn/`` up to the operator's interest depth,
+  including rendering their diagrams to SVG (FEAT-OPERATOR-EDU).
 
 **Does NOT**:
 
@@ -172,6 +175,9 @@ Each wave is a set of jobs with no unresolved dependencies.
 
 - Spawning sub-agent invocations (haiku by default, escalates per RULES.md).
 - The ``[synthesis]`` block returned to the Orchestrator.
+- ``.sdd/now.json`` (wave and job status), plus starting and opening the
+  Learn App on the first wave of a run, unless ``SDD_LEARN=off``. It never
+  waits on the Learn App (FEAT-OPERATOR-EDU).
 
 **Does NOT**:
 

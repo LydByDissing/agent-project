@@ -56,6 +56,30 @@ fall back to Grep/Read. Per-project settings — index scope, excludes, tool
 profile, on/off — live in `<project>/.claude/codegraph.json`; see
 `skills/rules/CODEGRAPH.md` for the full key list.
 
+## Learn while agents work
+
+While the conductor runs a wave, a local learning app can show short, sourced
+lessons on the topics the running jobs touch. The lessons live in `learn/` in
+your project (`<domain>/<topic>/<NN>-<slug>.md`, sources required, diagrams
+pre-rendered to SVG). The plan phase writes or refreshes them for the topics it
+tags on each job, up to your interest depth. Learner state (interest and
+mastery) lives in `~/.sdd/learner.json`, not in the repo.
+
+```bash
+node learn-app/server.js --project .    # serves http://127.0.0.1:4747
+```
+
+| Setting | Effect |
+|---|---|
+| `SDD_LEARN=off` | Do not start the app or open a browser |
+| `SDD_LEARN_PORT` | Port for the app (default `4747`) |
+| `SDD_LEARN_HOME` | Directory for `learner.json` (default `~/.sdd`) |
+
+`learn/` is separate from `docs/`. `docs/` is the specification that the
+pipeline is built from. `learn/` is teaching material for the operator. Nothing
+under `docs/` references `learn/`. Requires `node` and the `claude` CLI on
+`PATH`. Validate the library with `node learn-app/cli.js validate --project .`.
+
 ## State
 
 State lives in **bd (beads)**, the project's issue tracker. A bd epic

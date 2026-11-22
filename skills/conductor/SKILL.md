@@ -1,3 +1,7 @@
+<!-- [origin ref=llm-dsl-gu1y.11 req=REQ-OPERATOR-EDU-010 c4=sdd_skills/conductor]
+  [intent]Wave-based conductor prompt: spawns worker sub-agents in dependency order, reports wave and job status to the Learn App via scripts/learn_now.py, and returns the synthesis block.[/intent]
+[/origin] -->
+
 ---
 name: conductor
 description: >
@@ -39,6 +43,7 @@ Extract all `[job]` entries. For each job record:
 - `role` — coder | reviewer | tester
 - `model` — haiku | sonnet | opus
 - `depends` — comma-separated bd IDs this job waits for (absent = no deps)
+- `topics` — comma-separated topic tags for the Learn App (optional; absent = none)
 
 ### 2. Build the dependency graph
 
@@ -63,6 +68,16 @@ using the worker prompt below:
 - Spawn every job in the current wave in a single step (parallel within the
   wave) — pass `run_in_background=True` so the whole wave runs concurrently,
   then wait for all of them before starting the next wave
+- Before spawning a wave, publish it to the Learn App (fire and forget; never
+  wait on it, and ignore its output unless it is an error line):
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/learn_now.py" wave --project "$CLAUDE_PROJECT_DIR" \
+    --run "$RUN_ID" --wave N --jobs '[{"id":"<bd_id>","title":"<bd title>","topics":["<topic>"]}, ...]'
+  ```
+  `topics` is the job's `topics=` attribute as a list (empty list if absent);
+  `title` comes from `bd show <bd_id>`.
+- When each worker returns, report it the same way:
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/learn_now.py" job --project "$CLAUDE_PROJECT_DIR" --id <bd_id> --status done|failed`
 - Use the `model` attribute from the job entry as the sub-agent `model`
 - Set `subagent_type` to the job's `role` (coder | tester | reviewer) if a
   matching agent type exists; otherwise use the default and put the role in

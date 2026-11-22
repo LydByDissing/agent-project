@@ -7,3 +7,4 @@ Features
    github-issues
    design-chat
    tracer-bullets
+   operator-edu

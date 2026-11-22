@@ -1,0 +1,18 @@
+@startuml revalidation
+skinparam shadowing false
+participant "Client" as C
+participant "Cache" as K
+participant "Origin" as O
+
+C -> K : GET /api/catalog
+note right of K : entry is stale (max-age ran out)
+K -> O : GET /api/catalog\nIf-None-Match: "c3a1-9f2e"
+alt representation unchanged
+  O --> K : 304 Not Modified (no body)
+  note right of K : entry fresh again for max-age
+  K --> C : 200 OK (stored body)
+else representation changed
+  O --> K : 200 OK (new body, new ETag)
+  K --> C : 200 OK (new body)
+end
+@enduml
