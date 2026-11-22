@@ -169,3 +169,25 @@ Decisions
   checks in the plan.
 - Design gate passed; the run advances to plan.
 
+Implementation Review (request-changes)
+---------------------------------------
+
+**Agent**: The Opus reviewer returned request-changes: the protected set is
+read from the working-tree RULES.md so a run can disable it (crit); the HEAD
+script decides whether to re-run the base version; ``check --stage design``
+compares against the current tree, so resume after implement deadlocks; the
+sdd skill marks requirements implemented after closing the epic, breaking
+every later post check; the learn-app suite went red after the threat-modeling
+lesson was added (major); nine minor findings.
+
+**User**: Fix the crit and the majors; file the minors as follow-ups.
+
+Decisions
+~~~~~~~~~
+
+- REQ-SECURITY-REVIEW-008 clarified in place (operator choice, no docs
+  reset): the design-stage tree hash is taken at the design record's head
+  commit; the orchestrator, not the HEAD script, runs the base version; the
+  protected set is read from RULES.md at the base, merged with defaults, and
+  RULES.md is always protected.
+

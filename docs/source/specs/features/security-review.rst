@@ -273,8 +273,11 @@ Requirements
        ``skills`` tree, excluding ``docs/source/security/**`` (covered by
        the append-only test instead). A Python helper (``scripts/security_gate.py check
        --feature FEAT-XXX --stage design|post``) exits non-zero, naming the
-       cause, if: no review record exists for this run and stage; the
-       current tree hash differs from the record's; or a threat linked to the
+       cause, if: no review record exists for this run and stage; the tree
+       hash differs from the record's (at the post stage the current tree;
+       at the design stage the tree at the design record's head commit,
+       because implement legitimately changes ``docs/source`` and ``skills``
+       afterwards); or a threat linked to the
        feature is still ``open`` without a decision for this run (design) or
        is ``open`` at all (post). At the post stage it also fails if the
        record's head is not HEAD and ``git diff <head>..HEAD`` touches
@@ -282,8 +285,11 @@ Requirements
        protected set changed between the base and HEAD without being listed
        in this run's post review record with an operator decision. The phase
        cannot advance while it fails.
-       When HEAD changes ``scripts/security_gate.py``, the orchestrator runs
-       the version from the base commit. Decisions are collected only
+       When HEAD changes ``scripts/security_gate.py`` or its library, the
+       orchestrator itself runs the version from the base commit (the HEAD
+       script never decides this). The protected set is read from RULES.md
+       at the base commit, merged with the built-in defaults, and RULES.md
+       itself is always protected. Decisions are collected only
        through the interactive question tool, asked after the findings are
        shown, never from the initial prompt, command arguments, a sub-agent
        report, tool output or bd notes; both gates refuse to run in a
