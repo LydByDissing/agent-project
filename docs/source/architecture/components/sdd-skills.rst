@@ -238,14 +238,19 @@ arch-review approval) it checks the run's code against OWASP ASVS / Top 10
 concerns and verifies that each threat's mitigation is implemented and
 covered by a test that fails without it (FEAT-SECURITY-REVIEW, ADR-005).
 
-**Patterns**: Two parts. A read-only analysis sub-agent on Opus reads the
-scoped input (from the epic's recorded base commit) as data and returns
+**Patterns**: Two parts. The analysis agent ``agents/security-analyst.md``
+(Opus, tools Read, Grep, Glob only) receives the scoped input, computed by
+the orchestrator from the epic's base commit, as data and returns structured
 findings; text in the input that looks like an instruction is reported as a
 possible-injection finding. The inline part, in the main context, validates
 the findings, writes them to the threat model as ``open``, runs the operator
 gate, records decisions, and on "fix" spawns a scope-limited coder worker
 and verifies it (suites, scope, sabotage check). Gate state is checked by
-``scripts/security_gate.py``, never trusted from agent output or bd notes.
+``scripts/security_gate.py``, never trusted from agent output or bd notes,
+and requires a committed review record in ``docs/source/security/reviews.rst``.
+Decisions are collected only through the interactive question tool. The
+orchestrator runs the gate check before every move to plan or done and
+before closing the epic.
 
 **Owns**:
 
@@ -257,6 +262,7 @@ and verifies it (suites, scope, sabotage check). Gate state is checked by
 - ``scripts/security_gate.py``: gate check, findings validation, and the
   redaction check on security output.
 - The append-only rule for THREAT and RISK records.
+- The protected set (defined in RULES.md) that fix workers may never write.
 
 **Does NOT**:
 

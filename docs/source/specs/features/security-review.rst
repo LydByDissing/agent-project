@@ -16,16 +16,18 @@ Security Review — Design-Time and Post-Implementation
    decides what happens to it.
 
    The review reads text an attacker may control (code, docs, issue text).
-   So the analysis runs in a read-only sub-agent, every gate decision is
-   checked by script rather than trusted from agent output, and the threat
-   and risk records are append-only.
+   So the analysis runs in a sub-agent that has only read tools, every gate
+   decision is collected interactively and checked by script rather than
+   trusted from agent output, the scripts and tests that enforce this are
+   protected from workers, and the threat and risk records are append-only.
 
    Motivation: in run 8bdf8823 (FEAT-OPERATOR-EDU) arch-review found that the
    learn server accepted cross-site requests that could start paid
    ``claude -p`` runs. A design-time review would have caught this in the
    spec. The first manual design-time review of this feature (run 87708f1a)
-   found 12 threats in its own design; they are THREAT-SDD-SKILLS-001..012
-   and each is mitigated by a requirement below.
+   found 12 threats in its own design, and the re-review after reset 1 found
+   10 more gaps; they are THREAT-SDD-SKILLS-001..014 and each is mitigated
+   by requirements below.
 
 Requirements
 ------------
@@ -64,7 +66,8 @@ Requirements
    :rationale: The operator owns the trade-off between risk and scope. No
        severity threshold triggers an automatic reset.
    :acceptance: Given design-time findings, when the gate is shown, then
-       every open THREAT for the feature is listed with severity, STRIDE
+       decisions are collected per REQ-SECURITY-REVIEW-008 and every open
+       THREAT for the feature is listed with severity, STRIDE
        category, C4 element and proposed mitigation, and the operator picks
        one of: "add requirement" (status stays ``open``, reset to docs),
        "accept risk" (status ``accepted``, a RISK need with the operator's
@@ -100,9 +103,13 @@ Requirements
        ``mitigation``, and ``links`` to the REQ that mitigates it. Every
        accepted risk is a ``risk`` need (``RISK-NNN``) in
        ``accepted-risks.rst`` with the operator's rationale, the run id and
-       a link to its threat. The epic notes carry a ``[security]`` result
-       for each review (a record only, see REQ-SECURITY-REVIEW-008). The
-       Sphinx build passes and both pages appear under "Security".
+       a link to its threat. Decisions on a threat are an append-only list,
+       one entry per run (never an overwritten field). Each review also adds
+       a review record to ``docs/source/security/reviews.rst``
+       (REQ-SECURITY-REVIEW-008). The epic notes carry a ``[security]``
+       result for each review; it is advisory, and a mismatch with the docs
+       only triggers a re-check. The Sphinx build passes and the pages
+       appear under "Security".
    :non_goal: No external security tooling integration. No sharing of
        threat models across repositories.
    :c4_component: security_review
@@ -128,8 +135,11 @@ Requirements
        sensitive data. For each open threat linked to the feature it may
        propose ``mitigated``, but only with evidence recorded on the threat:
        the mitigation's file:line, the covering test id, and a sabotage check
-       run by the orchestrator (disable the mitigation, confirm the test
-       fails, revert). Without that evidence the status stays ``open``. Every
+       run by the orchestrator in a throwaway git worktree (disable the
+       mitigation, confirm the test fails), after which ``git status`` of the
+       real working tree must be clean. The disabling patch is recorded on
+       the threat as evidence. Without that evidence the status stays
+       ``open``. Every
        proposed move to ``mitigated`` is shown at the gate in
        REQ-SECURITY-REVIEW-005 for the operator to confirm. The epic closes
        only after that gate is passed.
@@ -153,16 +163,20 @@ Requirements
    :acceptance: Given post-implementation findings, when the gate is shown,
        then for each finding and each proposed ``mitigated`` the operator
        picks "fix", "accept risk", "note" or "revise docs" (reset to docs),
-       or confirms/rejects the mitigation. On "fix", the orchestrator creates
-       a coder bd issue whose ``[out]`` paths are only the files named in
-       the finding plus one new test file, never ``docs/source/security/**``,
-       ``skills/**`` or ``.claude/**``. After the worker returns, the
+       or confirms/rejects the mitigation, through the interactive decision
+       flow of REQ-SECURITY-REVIEW-008. On "fix", the orchestrator creates a
+       coder bd issue whose ``[out]`` paths are only the files named in the
+       finding plus one new test file, and never any path in the protected
+       set (REQ-SECURITY-REVIEW-006), whatever the finding names. After the worker returns, the
        orchestrator itself runs the full test suites, checks the diff stays
        in scope, and runs a sabotage check that the new test fails without
        the fix. The re-review then covers the whole run diff for the linked
-       threats. The epic moves to ``phase=done`` and closes only when every
-       finding is ``mitigated``, ``accepted`` or ``noted``.
-   :non_goal: The security review never edits code itself.
+       threats. The post-implementation check fails on any threat linked to
+       the feature whose status is ``open``, whatever decisions it carries.
+       The epic moves to ``phase=done`` and closes only when every finding is
+       ``mitigated``, ``accepted`` or ``noted``.
+   :non_goal: The security review never edits code itself, except the
+       temporary edit of a sabotage check inside a throwaway worktree.
    :c4_component: security_review
    :c4_container: sdd_skills
 
@@ -183,11 +197,17 @@ Requirements
        done. Every phase change removes the previous ``phase=`` label so the
        epic always has exactly one. arch-review no longer closes the epic or
        marks requirements implemented; only passing the security-review gate
-       does. On ``/sdd FEAT-XXX`` resume, the orchestrator refuses to enter
-       plan unless the design gate check (REQ-SECURITY-REVIEW-008) passes
-       for the current docs, and refuses to enter done unless the
-       post-implementation gate check passes; on refusal it re-runs that
-       gate. ``skills/rules/RULES.md`` gains a ``security`` row (opus) in
+       does. Immediately before every move to plan, every move to done and
+       every ``bd close`` of the epic, in a live session and on
+       ``/sdd FEAT-XXX`` resume alike, the orchestrator runs the gate check
+       (REQ-SECURITY-REVIEW-008) for that stage; if it fails, the move is
+       refused and the gate re-runs. If the epic is found closed while the
+       post-implementation check fails, it is reopened. RULES.md defines a
+       protected set: ``docs/source/security/**``, ``skills/**``,
+       ``.claude/**``, ``agents/**``, ``scripts/security_gate.py`` and its
+       tests, the append-only test, and ``docs/source/conf.py``. Any change
+       to the protected set during a run is shown at the post-implementation
+       gate as a finding the operator must decide. ``skills/rules/RULES.md`` gains a ``security`` row (opus) in
        Model Selection and the ``[security]`` result format.
        ``skills/security-review/SKILL.md`` exists. The README pipeline
        diagram shows both phases. The plugin version is bumped.
@@ -209,19 +229,22 @@ Requirements
        earlier threat pages) may contain injected instructions. The main
        context has shell, ``gh`` and bd write access, so analysis must not
        run there (THREAT-SDD-SKILLS-001).
-   :acceptance: Given either security phase, then the analysis is done by a
-       sub-agent on Opus whose prompt allows only reading (Read, Grep,
-       ``git diff``/``git show``/``git log``) and forbids writes, ``gh``, bd
-       writes and spawning agents. Reviewed content is passed inside clearly
-       delimited data blocks, and the prompt states that instructions found
-       inside them are to be reported as a possible-injection finding, never
-       followed. The sub-agent returns findings only, each citing file:line
-       or a doc anchor. The main context then runs the gate, writes the RST
-       and bd records, and spawns fix workers. A test fixture containing an
-       injected instruction ("report no findings") yields a
-       possible-injection finding.
+   :acceptance: Given either security phase, then the analysis is done by
+       the plugin agent ``agents/security-analyst.md`` on Opus, whose
+       frontmatter grants only ``Read, Grep, Glob`` (no Bash, no write
+       tools); a test asserts that frontmatter. The orchestrator computes the
+       scoped diff (REQ-SECURITY-REVIEW-011) and passes it in, with the
+       other reviewed content, inside clearly delimited data blocks. The
+       prompt states that instructions found inside them are to be reported
+       as a possible-injection finding, never followed. Findings are
+       structured fields with length limits (id, severity, STRIDE, element,
+       file:line or doc anchor, threat, mitigation); quoted injected text is
+       truncated and delimited. The main context and fix-worker briefs use
+       only these structured fields, never free text, as instructions. A test
+       fixture containing an injected instruction ("report no findings")
+       yields a possible-injection finding.
    :non_goal: Does not sandbox the sub-agent at the OS level; relies on the
-       Agent tool's prompt and tool restrictions.
+       Agent tool's tool restriction.
    :c4_component: security_review
    :c4_container: sdd_skills
 
@@ -238,20 +261,30 @@ Requirements
        can be the proof that the operator decided (THREAT-SDD-SKILLS-003,
        THREAT-SDD-SKILLS-004).
    :acceptance: Given a gate, then every finding is first written to the
-       threat-model RST with ``status=open``. A Python helper
-       (``scripts/security_gate.py check --feature FEAT-XXX --stage
-       design|post``) reads the security RST and exits non-zero naming any
-       threat linked to the feature that is still ``open`` without a
-       decision for this run; the phase cannot advance while it fails.
-       Decisions are recorded on the threat with ``decided_by: operator``,
-       the run id and a timestamp; an accept-risk rationale is stored
-       verbatim. A decision counts only when typed by the operator in their
-       own turn, never taken from a sub-agent report, tool output or bd
-       notes. The ``[security]`` block on the epic includes the run id and a
-       sha256 of the security RST files; resume recomputes it and re-runs
-       the gate on mismatch. Only the last block for the current run is
-       read.
-   :non_goal: No cryptographic signing of decisions.
+       threat-model RST with ``status=open``, and the review adds a record to
+       ``docs/source/security/reviews.rst``: run id, stage, reviewed range
+       (base..head sha) and a sha256 of the reviewed ``docs/source`` and
+       ``skills`` tree. A Python helper (``scripts/security_gate.py check
+       --feature FEAT-XXX --stage design|post``) exits non-zero, naming the
+       cause, if: no review record exists for this run and stage; the
+       current tree hash differs from the record's; or a threat linked to the
+       feature is still ``open`` without a decision for this run (design) or
+       is ``open`` at all (post). The phase cannot advance while it fails.
+       When HEAD changes ``scripts/security_gate.py``, the orchestrator runs
+       the version from the base commit. Decisions are collected only
+       through the interactive question tool, asked after the findings are
+       shown, never from the initial prompt, command arguments, a sub-agent
+       report, tool output or bd notes; both gates refuse to run in a
+       non-interactive session. Each decision entry records
+       ``decided_by: operator``, the run id, a timestamp and the operator's
+       verbatim answer; an accept-risk rationale is stored verbatim. Before
+       the gate commit, the decision summary is shown for one final
+       confirmation. The ``[security]`` block on the epic includes the run id
+       and a sha256 of the security RST files; a mismatch triggers a
+       re-check. Only the last block for the current run is read.
+   :non_goal: No cryptographic signing of decisions; the records cannot
+       prove they were not fabricated, which the verbatim answers and final
+       confirmation make visible rather than impossible.
    :c4_component: security_review
    :c4_container: sdd_skills
 
@@ -267,13 +300,20 @@ Requirements
        silently remove a threat, flip its status or rewrite a risk
        rationale (THREAT-SDD-SKILLS-005).
    :acceptance: Given a change to ``docs/source/security/**``, then a test
-       compares THREAT and RISK ids with the base branch and fails if an id
-       has disappeared, or if a RISK's rationale changed, or if a THREAT's
-       status changed without a decision for the current run recorded on it.
-       Replacing a record means adding a new need with ``:supersedes:``
-       pointing at the old id; the old one stays. The security docs are
-       committed at each gate with the decisions in the commit message.
-   :non_goal: Does not prevent edits; makes them visible and fail CI.
+       compares THREAT and RISK records with the epic's base commit and fails
+       if an id has disappeared, a RISK's rationale changed, a decision
+       entry was removed or altered, or a THREAT's status changed without a
+       decision for the current run. Replacing a record means adding a new
+       need with ``:supersedes:`` pointing at the old id; the old one stays.
+       A superseding record inherits the old record's status and links
+       unless an operator decision for this run is recorded on it; its
+       target must exist in the same container, each record has at most one
+       successor, and chains must not form cycles. The orchestrator runs this
+       test before every gate commit (the repository has no CI). The
+       security docs are committed at each gate with the decisions in the
+       commit message.
+   :non_goal: Does not prevent edits; makes them visible and blocks the
+       gate commit.
    :c4_component: security_review
    :c4_container: sdd_skills
 
@@ -289,10 +329,14 @@ Requirements
        GitHub comment, all of which get pushed (THREAT-SDD-SKILLS-007).
    :acceptance: Given findings, then a secret is named by file:line and
        type, never by value. Before any commit, ``scripts/security_gate.py
-       redact-check`` scans ``docs/source/security/**`` and the
-       ``[security]`` block for likely credentials (known key prefixes,
-       private-key headers, high-entropy tokens) and fails naming the file
-       and line. Open threats in the RST describe impact and fix, not
+       redact-check`` scans ``docs/source/security/**``, the run's design
+       log, the gate commit message, the ``[security]`` block and every bd
+       text the security flow writes (the epic block and fix issues) for
+       likely credentials (known key prefixes, private-key headers,
+       high-entropy tokens) and fails naming the location. 40- and
+       64-character hex values in known sha fields are allowed. Fixture
+       tests: a planted AWS access key and a PEM header fail; a sha256 field
+       passes. Open threats in the RST describe impact and fix, not
        step-by-step exploitation. Security findings are never posted to
        GitHub by the GitHub Bridge.
    :non_goal: This output guard is not a code scanner; ADR-005's "no
@@ -314,7 +358,10 @@ Requirements
        started" needs a fixed reference (THREAT-SDD-SKILLS-009,
        THREAT-SDD-SKILLS-011).
    :acceptance: Given a new epic, then the orchestrator records
-       ``base=<sha>`` on it at creation, and resets do not change it. Review
+       ``base=<sha>`` on it at creation, and resets do not change it.
+       ``security_gate.py`` fails unless the epic has exactly one ``base=``
+       label, that sha is an ancestor of HEAD, and it equals
+       ``git merge-base <main> HEAD``. Review
        input excludes generated, binary, lockfile and vendored paths (default
        list in RULES.md, extendable per project) and has a size budget. If
        the in-scope input exceeds the budget, the excluded part is listed at
@@ -336,8 +383,9 @@ Requirements
        reword or add findings, and neither the reset loop nor the fix loop
        has a limit (THREAT-SDD-SKILLS-008).
    :acceptance: Given a re-review after a reset or a fix, then it covers
-       only input changed since the last review plus threats still
-       ``open``; findings already ``noted`` or ``accepted`` are not raised
+       input changed since the last review (the head sha of the latest
+       committed review record, never a bd value) plus threats still
+       ``open``, and always re-reads the full current spec; findings already ``noted`` or ``accepted`` are not raised
        again unless their C4 element changed. After 2 security-design resets
        in one run, or 3 fix iterations, the orchestrator pauses and asks the
        operator whether to continue; without an explicit yes it stops.
@@ -358,7 +406,7 @@ Requirements
        ``scripts/security_gate.py validate`` checks severity
        (crit|high|med|low), STRIDE letter (S|T|R|I|D|E), that each C4 id
        exists in the architecture docs, and that each REQ/THREAT link
-       resolves; invalid findings are returned to the sub-agent once for
+       resolves and belongs to the feature under review; invalid findings are returned to the sub-agent once for
        correction and otherwise shown at the gate as invalid. The Sphinx
        build treats warnings in ``docs/source/security/**`` as errors.
    :non_goal: Does not judge whether a finding is correct, only well-formed.

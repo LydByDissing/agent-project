@@ -84,3 +84,38 @@ Decisions
 - ADR-005 clarified: read-only analysis sub-agent; output credential guard
   is not a code scanner.
 
+Design-Time Security Gate (review 2, reset 2)
+---------------------------------------------
+
+**Agent**: Ran the incremental re-review (Opus, read-only) over the reset-1
+changes and the 12 open threats. Verdict: 4 threats adequately covered, 8
+partly. Ten findings, SD2-01..SD2-10: the gate check passes when no review
+ran; the enforcement code is editable by workers and there is no CI; "the
+operator's own turn" is untestable and headless runs could treat issue text
+as a turn; the ``base=`` label is forgeable (high); read-only is prompt-only;
+the supersedes loophole; the redaction scope; in-session phase moves; the
+sabotage check edits the real tree (med); small requirement gaps (low).
+
+**User**: Add all four high findings as requirements. Add all medium and
+low findings in the same reset. If a third review still finds issues, only
+crit/high go back to docs.
+
+Decisions
+~~~~~~~~~
+
+- Reset to docs (``reset-count=2``); the operator confirmed continuing past
+  REQ-012's two-reset limit.
+- New threats THREAT-SDD-SKILLS-013 (enforcement code editable) and -014
+  (forgeable review anchor). Partial gaps folded into the links of
+  existing threats.
+- REQ-002..013 amended: review record with tree hash; protected set in
+  RULES.md; gate script run from base when changed; interactive-only
+  decisions with verbatim answers and final confirmation; check before every
+  phase move and epic close; analysis agent with Read/Grep/Glob only and
+  structured findings; superseding records inherit status; decision list per
+  run; wider redaction scope with sha allowlist; sabotage in a throwaway
+  worktree; base label verified against the merge-base; links must belong
+  to the feature.
+- Policy for review 3 in this run: crit/high reset to docs; med/low are
+  recorded as noted.
+

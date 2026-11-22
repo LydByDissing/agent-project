@@ -2,9 +2,10 @@ SDD Skills — Threat Model
 =========================
 
 Container: ``sdd_skills``. Threats recorded by the design-time security
-review of FEAT-SECURITY-REVIEW (run 87708f1a, 2026-11-22). The operator chose
-"add requirement" for all twelve, so each stays ``open`` until the linked
-requirement is implemented and verified.
+review of FEAT-SECURITY-REVIEW (run 87708f1a, 2026-11-22): 001..012 from the
+first review, 013..014 from the re-review after reset 1. The operator chose
+"add requirement" for all of them, so each stays ``open`` until the linked
+requirements are implemented and verified.
 
 Trust boundaries
 ----------------
@@ -35,7 +36,7 @@ Threats
    :stride: E
    :c4_scope: security_review sdd_orchestrator
    :mitigation: Single phase label; arch-review stops closing the run; resume refuses to skip a failing gate.
-   :links: REQ-SECURITY-REVIEW-006
+   :links: REQ-SECURITY-REVIEW-006, REQ-SECURITY-REVIEW-008
 
    arch-review closes the epic before security-review runs, and phase labels accumulate so any agent can add phase=done or phase=plan.
 
@@ -45,7 +46,7 @@ Threats
    :stride: R
    :c4_scope: security_review sdd_orchestrator
    :mitigation: Findings written as open first; gate state checked by script; decisions only from the operator's own turn, rationale verbatim.
-   :links: REQ-SECURITY-REVIEW-008
+   :links: REQ-SECURITY-REVIEW-008, REQ-SECURITY-REVIEW-002
 
    The agent writes the findings, the gate summary and the decision record, so it can omit findings or invent decisions.
 
@@ -115,7 +116,7 @@ Threats
    :stride: E
    :c4_scope: security_review sdd_orchestrator
    :mitigation: Out paths limited to the finding's files plus one test; orchestrator verifies suites, scope and sabotage.
-   :links: REQ-SECURITY-REVIEW-005
+   :links: REQ-SECURITY-REVIEW-005, REQ-SECURITY-REVIEW-006
 
    The fix worker's brief comes from finding text; without scope limits it could weaken tests or edit security docs or skills.
 
@@ -125,7 +126,7 @@ Threats
    :stride: T
    :c4_scope: security_review sdd_orchestrator
    :mitigation: Recorded base sha, explicit trust boundaries, id mapping, noted status, SKILL.md diff as design input.
-   :links: REQ-SECURITY-REVIEW-011
+   :links: REQ-SECURITY-REVIEW-001, REQ-SECURITY-REVIEW-002, REQ-SECURITY-REVIEW-003, REQ-SECURITY-REVIEW-011
 
    No base commit, no trust-boundary list, an id format that breaks the needs regex, undefined 'note', and skill prompts never reviewed at design time.
 
@@ -138,3 +139,27 @@ Threats
    :links: REQ-SECURITY-REVIEW-013
 
    Unvalidated severity, STRIDE values, C4 ids or links enter published needs.
+
+.. threat:: Enforcement code editable by workers
+   :id: THREAT-SDD-SKILLS-013
+   :status: open
+   :stride: T
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Protected set in RULES.md that fix workers never write; changes to it are mandatory gate findings; gate script run from the base commit; append-only test run by the orchestrator before each gate commit.
+   :links: REQ-SECURITY-REVIEW-005, REQ-SECURITY-REVIEW-006, REQ-SECURITY-REVIEW-008, REQ-SECURITY-REVIEW-009
+
+   The gate script, the append-only test and the Sphinx config sit in paths
+   workers can edit, and there is no CI, so any worker could make the
+   safeguards always pass.
+
+.. threat:: Review anchor forgeable through bd labels
+   :id: THREAT-SDD-SKILLS-014
+   :status: open
+   :stride: T
+   :c4_scope: security_review sdd_orchestrator
+   :mitigation: Exactly one base label, ancestor of HEAD, equal to the merge-base with main; last-reviewed sha taken from the committed review record, never bd.
+   :links: REQ-SECURITY-REVIEW-011, REQ-SECURITY-REVIEW-012
+
+   Any agent can move or duplicate the ``base=`` label and so empty the review
+   diff; the "last review" anchor for incremental re-reviews was undefined.
+
