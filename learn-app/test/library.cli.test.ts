@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.4 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.4,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Runs the bundled learn-app/cli.js as a child process to verify `learn validate` exit codes and named problems, and checks that no docs/source file includes or links into learn/.[/intent]
 // [/origin]
 import { spawnSync } from 'node:child_process';
@@ -222,7 +222,7 @@ describe('learn validate (bundled cli.js): the repo seed', () => {
   it('exits 0 for the repo learn/ with the expected tree summary', () => {
     const run = validate(REPO);
     expect(run.code).toBe(0);
-    expect(run.stdout).toEqual(['learn OK: 1 domains, 1 topics, 2 lessons, 1 prerequisite edges']);
+    expect(run.stdout).toEqual(['learn OK: 2 domains, 2 topics, 3 lessons, 1 prerequisite edges']);
     expect(run.stderr).toEqual([]);
   });
 });

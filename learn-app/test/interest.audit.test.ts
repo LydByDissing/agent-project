@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.10 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
+// [origin ref=llm-dsl-gu1y.17,llm-dsl-gu1y.10,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-006 c4=learn_app/learn_spa]
 //   [intent]Audits the interest feature against REQ-OPERATOR-EDU-006: PUT /api/interest is atomic over partial maps, domain and topic skip semantics hold in selection, GET titles come from index.yaml, and the onboarding and lesson controls write the right keys when clicked in a real headless Chromium.[/intent]
 // [/origin]
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ afterAll(() => {
 });
 
 function fixture(learner?: Learner) {
-  const { project, home } = makeProject({ tls: true, learner });
+  const { project, home } = makeProject({ tls: true, learner, domains: ['backend'] });
   const app = makeApp({
     project,
     distDir: project,

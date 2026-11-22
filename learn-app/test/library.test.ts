@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.3 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-gu1y.3,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-001,REQ-OPERATOR-EDU-002,REQ-OPERATOR-EDU-003 c4=learn_app/lesson_library]
 //   [intent]Verifies the lesson library loader and `learn validate` against fixture trees and the real seed learn/ directory.[/intent]
 //   [inv]Every validation rule has a failing fixture and a passing positive control.[/inv]
 // [/origin]
@@ -330,11 +330,13 @@ describe('loadLibrary: structure and front matter', () => {
 describe('seed learn/ in this repo', () => {
   it('passes validation', () => {
     const lib = loadLibrary(REPO);
-    expect(lib.domains.map((d) => d.id)).toEqual(['backend']);
+    expect(lib.domains.map((d) => d.id)).toEqual(['backend', 'security']);
     expect(lib.domains[0].topics.map((t) => t.id)).toEqual(['backend/http-caching']);
+    expect(lib.domains[1].topics.map((t) => t.id)).toEqual(['security/threat-modeling']);
     expect(lib.lessons.map((l) => l.id)).toEqual([
       'backend/http-caching/01-freshness',
       'backend/http-caching/02-revalidation',
+      'security/threat-modeling/01-stride',
     ]);
     expect(lib.lessons[1].diagrams).toEqual(['revalidation']);
     expect(lib.edges).toEqual([{ from: 'backend/http-caching/02-revalidation', to: 'backend/http-caching/01-freshness' }]);
