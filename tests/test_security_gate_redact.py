@@ -1,21 +1,34 @@
-# [origin ref=llm-dsl-2zv1.7 req=REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
+# [origin ref=llm-dsl-2zv1.7,llm-dsl-2zv1.8 req=REQ-SECURITY-REVIEW-010 c4=sdd_skills/security_review]
 #   [intent]Fixture tests for the redact-check subcommand: planted credentials fail with file:line and a masked value, sha fields and this repo's security docs pass.[/intent]
 # [/origin]
 
+import random
+import string
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GATE = ROOT / "scripts" / "security_gate.py"
+ALNUM = string.ascii_letters + string.digits
+
+
+def rnd(seed: int, n: int) -> str:
+    r = random.Random(seed)
+    while True:
+        v = "".join(r.choice(ALNUM) for _ in range(n))
+        if any(c.isdigit() for c in v) and any(c.isalpha() for c in v):
+            return v
+
+
 AWS = "AK" + "IA" + "ABCDEFGHIJKLMNOP"
 PEM = "-----BEGIN " + "RSA PRIVATE" + " KEY-----"
-GH = "gh" + "p_" + "aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5"
+GH = "gh" + "p_" + rnd(11, 36)
 ANT = "sk-" + "ant-" + "api03-Zx9Qw8Er7Ty6"
 SLACK = "xo" + "xb-" + "1234567890-abcdefghij"
 STRIPE = "sk_" + "live_" + "abcdEFGH1234ijkl"
-GOOG = "AI" + "za" + "SyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q"
-RAND = "q8Zt3LmX0vB7nR2wYk5HcD9sFa6JePu1"
+GOOG = "AI" + "za" + rnd(12, 35)
+RAND = rnd(13, 32)
 HEX64 = "0123456789abcdef" * 4
 HEX40 = "89abcdef01" * 4
 
@@ -69,7 +82,7 @@ def test_slack_stripe_google_fail(tmp_path):
 
 def test_high_entropy_token_fails(tmp_path):
     rc, out = one(tmp_path, f"secret: {RAND}\n")
-    assert rc == 1 and "high-entropy-token q8Zt" in out and RAND not in out
+    assert rc == 1 and "high-entropy-token " + RAND[:4] in out and RAND not in out
 
 
 def test_unlisted_hex_fails(tmp_path):
