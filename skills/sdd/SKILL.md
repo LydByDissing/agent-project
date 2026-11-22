@@ -1,12 +1,12 @@
-<!-- [origin ref=llm-dsl-yms.3 req=REQ-GITHUB-ISSUES-002,REQ-GITHUB-ISSUES-003 c4=sdd_skills/sdd_orchestrator]
-  [intent]Entry point for Spec-Driven Development pipeline; orchestrates docs, plan, implement, and arch-review phases with support for GitHub issue integration.[/intent]
+<!-- [origin ref=llm-dsl-yms.3,llm-dsl-2zv1.13,llm-dsl-2zv1.17 req=REQ-GITHUB-ISSUES-002,REQ-GITHUB-ISSUES-003,REQ-SECURITY-REVIEW-006,REQ-SECURITY-REVIEW-003 c4=sdd_skills/sdd_orchestrator]
+  [intent]Entry point for Spec-Driven Development pipeline; orchestrates docs, security-design, plan, implement, arch-review, and security-review phases with support for GitHub issue integration.[/intent]
 [/origin] -->
 
 ---
 name: sdd
 description: >
   Spec-Driven Development entry point. Drives the full SDD pipeline
-  autonomously: docs → plan → implement → arch-review. Takes a feature name,
+  autonomously: docs → security-design → plan → implement → arch-review → security-review → done. Takes a feature name,
   FEAT-XXX identifier, or GitHub issue number (#N). State is tracked in a bd
   epic. Resumes from current phase if the epic already exists. Resets to docs
   phase when any downstream skill surfaces a new requirement. Use whenever
@@ -16,8 +16,9 @@ description: >
 # SDD Skill — Spec-Driven Development
 
 This skill is the single entry point for all feature work. It drives the
-pipeline autonomously, pausing only at the three mandatory user approval
-gates. Everything between gates is automatic.
+pipeline autonomously, pausing at the three mandatory user approval
+gates and at the two security-review operator pauses (design and post). Everything
+else is automatic.
 
 Read `skills/rules/RULES.md` before starting.
 
@@ -36,17 +37,17 @@ Read `skills/rules/RULES.md` before starting.
 ## Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        SDD Pipeline                             │
-│                                                                 │
-│  docs ──[user approves docs]──► plan ──[user approves plan]──► │
-│  ──► conductor ──► implement ──► arch-review ──[user approves]──► done
-│                                                                 │
-│  Any phase can reset to docs if [new-req] is discovered.        │
-└─────────────────────────────────────────────────────────────────┘
+docs → security-design → plan → implement → arch-review → security-review → done
+
+docs ──[approve docs]──► security-design ──[operator gate]──► plan ──[approve plan]──►
+  conductor ──► implement ──► arch-review ──[approve]──► security-review ──[operator gate]──► done
+
+Any phase can reset to docs if [new-req] is discovered.
 ```
 
-Three approval gates. Three reset paths. Everything else is autonomous.
+Three approval gates plus two security-review operator pauses (security-design
+and security-review). Three reset paths plus the security resets. Everything
+else is autonomous.
 
 ---
 
@@ -56,9 +57,11 @@ State lives in the bd epic. Create one epic per feature per SDD run.
 
 Epic labels:
 - `feat=FEAT-XXX` — the feature being worked on
-- `phase=docs|plan|implement|arch-review|done` — current phase
+- `phase=docs|security-design|plan|implement|arch-review|security-review|done` — current phase;
+  **exactly one** `phase=` label at all times (see Phase changes)
 - `run=<run_id>` — 8-char hex run identifier
-- `reset-count=<n>` — number of times the pipeline has reset to docs
+- `reset-count=<n>` — number of times the pipeline has reset to docs (every reset, including security-design and security-review resets)
+- `base=<sha>` — fork point the security review diffs from; operator-confirmed at epic creation (see Base)
 
 External reference (GitHub issue):
 - `--external-ref gh-N` — link to GitHub issue (if invoked via /sdd #N)
@@ -75,9 +78,67 @@ for L in "feat=FEAT-XXX" "phase=docs" "run=$RUN_ID" "reset-count=0"; do bd label
 # Read current phase
 bd show $EPIC_ID | grep "phase="
 
-# Advance phase
+# Advance phase: remove the old phase label, then add the new one
+OLD=$(bd show $EPIC_ID --json | grep -oP 'phase=\K[a-z-]+' | head -1)
+bd label remove $EPIC_ID "phase=$OLD"
 bd label add $EPIC_ID "phase=plan"
 ```
+
+### Phase changes
+
+Every phase change removes the old phase label with `bd label remove` before
+adding the new one, so the epic carries exactly one `phase=` label. Verify with
+`bd show $EPIC_ID --json | grep -o 'phase=[a-z-]*'` (one line). Never leave two.
+
+### Base
+
+At epic creation, work out the fork point: the commit the run branched from
+(on a stacked branch this is NOT the merge-base with main). Ask the operator to
+confirm it with AskUserQuestion, then label the epic `base=<sha>`. The security
+review skill writes the confirmed base into the `Base` column of the first
+review record in `docs/source/security/reviews.rst`; that record, not the label,
+is the source of truth, and the label mirrors it.
+
+### Security gate
+
+The gate script decides whether the security state allows a move. Run it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security_gate.py" check --feature FEAT-XXX --stage design|post --epic $EPIC_ID --main main
+```
+
+- before every move to `plan` (`--stage design`);
+- before every move to `done` (`--stage post`);
+- before every `bd close` of the epic (`--stage post`);
+- live, when the move happens, and again on resume (see Crash Recovery).
+
+Every call site below runs it as described in "Running the gate check".
+
+Exit 0 is required. On non-zero, show the error lines, do not move the phase and
+do not close. Never bypass it. If the epic was closed while the post check fails,
+reopen it (`bd reopen $EPIC_ID`), set `phase=security-review`, and re-run the
+security-review phase.
+
+#### Running the gate check
+
+The orchestrator, not the script, decides whether the base copy of the gate must
+also run. For each `check`:
+
+1. Run `base-path` first:
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security_gate.py" base-path --epic $EPIC_ID --repo "$CLAUDE_PROJECT_DIR"`.
+   It prints `base=<sha>`, `security_gate.py=<same|differs|absent>` and
+   `security_gate_lib.py=<same|differs|absent>`.
+2. Run the HEAD `check` (command above, `--repo "$CLAUDE_PROJECT_DIR"`); exit 0 is required.
+3. If either gate file is `differs`: create a throwaway worktree at the base
+   (`WT=$(mktemp -d); git worktree add "$WT" <base>`), run
+   `python3 -I "$WT/scripts/security_gate.py" check <same arguments> --repo "$CLAUDE_PROJECT_DIR"`,
+   and remove the worktree (`git worktree remove --force "$WT"`), also when the run
+   fails. Exit 0 from that base run is required as well as from the HEAD run.
+4. If a gate file is `absent` at the base: show the mandatory notice
+   "gate script unverified (bootstrap)" to the operator at the gate; the check
+   cannot prove the script itself.
+
+Only when every required run exits 0 is the check passed.
 
 ---
 
@@ -152,7 +213,10 @@ if [ -z "$EPIC_ID" ]; then
   for L in "feat=FEAT-XXX" "phase=docs" "run=$RUN_ID" "reset-count=0"; do bd label add $EPIC_ID "$L"; done   # one label per call
 fi
 
-CURRENT_PHASE=$(bd show $EPIC_ID | grep -oP "phase=\K[a-z-]+")
+# confirm the base (fork point) with the operator, then label it
+bd label add $EPIC_ID "base=<confirmed sha>"
+
+CURRENT_PHASE=$(bd show $EPIC_ID --json | grep -oP "phase=\K[a-z-]+" | head -1)
 ```
 
 Resume from `CURRENT_PHASE`. Do not re-run completed phases.
@@ -185,8 +249,44 @@ If docs skill returns `reset:<reason>`:
 - Re-run the docs phase
 
 If docs skill returns `approved`:
-- Update epic: `phase=plan`
+- Remove `phase=docs`, add `phase=security-design`
+- Advance to security-design phase
+
+---
+
+### Phase: security-design
+
+**Purpose**: the security analyst reviews the approved design (docs) before any
+planning, and the operator decides each finding at an interactive gate.
+
+**Run it inline, in this (main-agent) context. Do NOT spawn it as a sub-agent**:
+the skill spawns the analysis agent and fix workers and asks the operator
+questions.
+
+```
+Read skills/security-review/SKILL.md and execute it here, in the main context.
+
+Inputs:
+- FEAT_ID: FEAT-XXX
+- RUN_ID: <run_id>
+- EPIC_ID: <epic_id>
+- STAGE: design
+- CLAUDE_PROJECT_DIR: <project_dir>
+
+Return the [security-review-result ... signal=advance|reset|stopped] line.
+```
+
+If `signal=reset`:
+- Increment `reset-count` (security-design resets count towards the 3+ escalation)
+- Remove `phase=security-design`, add `phase=docs`
+- Pass the "add requirement" findings to the docs phase as the first new requirements
+
+If `signal=advance`:
+- Run the security gate check (`--stage design`, see Running the gate check); it must exit 0
+- Remove `phase=security-design`, add `phase=plan`
 - Advance to plan phase
+
+If `signal=stopped`: stay in `phase=security-design` and report to the user.
 
 ---
 
@@ -214,7 +314,7 @@ issue creation steps. Return one of:
 ```
 
 If plan returns `reset:<reason>`:
-- Update epic: `phase=docs`
+- Remove `phase=plan`, add `phase=docs`
 - Increment `reset-count`
 - Re-run from docs phase
 
@@ -226,7 +326,7 @@ If plan returns an `[exec]` block:
     bd update $JOB_ID --external-ref $EXTERNAL_REF
   done
   ```
-- Update epic: `phase=implement`
+- Remove `phase=plan`, add `phase=implement`
 - Advance to conductor
 
 ---
@@ -260,7 +360,7 @@ tool needed to spawn workers.
 Read the synthesis block returned by the conductor.
 
 If `s=reset` in synthesis:
-- Update epic: `phase=docs`
+- Remove `phase=implement`, add `phase=docs`
 - Increment `reset-count`
 - Collect all `[new-req]` descriptions from the synthesis
 - Pass them to the docs skill in the next docs phase invocation
@@ -268,13 +368,16 @@ If `s=reset` in synthesis:
 - Re-run from docs phase
 
 If `s=ok`:
-- Update epic: `phase=arch-review`
+- Remove `phase=implement`, add `phase=arch-review`
 - Advance to arch-review
 
 If `s=partial` or `s=fail`:
 - Report blocked issues to user
 - Ask user: fix and re-run, or reset to plan?
-- Act accordingly
+- Fix and re-run: stay at `phase=implement` and re-invoke the conductor.
+- Reset to plan: `bd label remove $EPIC_ID phase=implement`, then run the
+  security gate check (`--stage design`, see Running the gate check), then `bd label add $EPIC_ID phase=plan`
+  and re-run the plan phase.
 
 ---
 
@@ -302,14 +405,52 @@ Inputs:
 Read the arch-review result:
 
 If `s=approved`:
-- Update epic: `phase=done`
-- Close epic: `bd close $EPIC_ID`
-- Report completion to user
+- Arch-review does NOT close the epic or mark requirements implemented.
+- Mark the feature's requirements `status=implemented` in docs (RST status edits) and
+  commit it now, before the security-review phase starts, so its final
+  review/gate commit, post tree hash and post-head binding include this edit.
+- Remove `phase=arch-review`, add `phase=security-review`
+- Advance to security-review phase
 
 If `s=reset`:
-- Update epic: `phase=docs`
+- Remove `phase=arch-review`, add `phase=docs`
 - Increment `reset-count`
 - Re-run from docs phase
+
+---
+
+### Phase: security-review
+
+**Purpose**: the security analyst reviews the implemented code and the operator
+decides each finding at an interactive gate. Only after this does the run finish.
+
+**Run it inline, in this (main-agent) context. Do NOT spawn it as a sub-agent.**
+
+```
+Read skills/security-review/SKILL.md and execute it here, in the main context.
+
+Inputs:
+- FEAT_ID: FEAT-XXX
+- RUN_ID: <run_id>
+- EPIC_ID: <epic_id>
+- STAGE: post
+- CLAUDE_PROJECT_DIR: <project_dir>
+
+Return the [security-review-result ... signal=advance|reset|stopped] line.
+```
+
+If `signal=reset` ("revise docs" or an added requirement):
+- Increment `reset-count`
+- Remove `phase=security-review`, add `phase=docs`
+- Re-run from docs phase
+
+If `signal=stopped`: stay in `phase=security-review` and report to the user.
+
+If `signal=advance`:
+- Run the security gate check (`--stage post`, see Running the gate check); it must exit 0
+- Remove `phase=security-review`, add `phase=done`
+- Run the check again (see Running the gate check) immediately before `bd close $EPIC_ID`, then close the epic; no docs edit happens after the close
+- Report completion to user
 
 ---
 
@@ -329,7 +470,7 @@ Requirements implemented:
 Files changed:
 <list of artifacts from the run>
 
-The epic is closed. All requirements are marked implemented in docs.
+The epic is closed only after the post security check passed. All requirements are marked implemented in docs.
 ```
 
 ---
@@ -343,7 +484,8 @@ After a reset, the docs phase receives the new requirement descriptions as
 context so the interviewer starts by capturing those first.
 
 Maximum resets before escalating to user: none — the loop runs until done.
-But after 3+ resets, surface the pattern to the user:
+The count includes security-design and security-review resets.
+After 3+ resets (counting every reset, security ones included), surface the pattern to the user:
 
 ```
 This feature has reset N times. The recurring gap is: <pattern>.
@@ -363,6 +505,16 @@ For stalled conductor runs:
 ```bash
 bd list --label "run=$RUN_ID" --status open
 ```
+
+Before resuming, run the security gate check live again: `--stage design` when
+the epic is at `phase=plan`, `phase=implement` or `phase=arch-review` (the
+design gate must have passed for any of them), `--stage post` at
+`phase=security-review` or `phase=done`. At `phase=docs` or
+`phase=security-design` no gate has passed yet, so run the security-design
+phase rather than a check, and never skip it because an earlier run passed.
+The design-stage hash is taken at the design record's head commit, so `--stage design`
+at plan, implement or arch-review does not deadlock on later commits. If the epic is closed but
+the post check fails, reopen it and set `phase=security-review`.
 
 Re-invoke from the implement phase — the conductor will re-read open issues
 and resume wave execution.

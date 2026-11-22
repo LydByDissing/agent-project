@@ -10,6 +10,7 @@ Container_Boundary(skills, "SDD Skills") {
     Component(plan_skill, "Plan Skill", "plan/SKILL.md", "Preflight checks. Decomposes\nrequirements into bd tasks.\nCreates bd issues with DSL briefs.\nConfirm gate before issue creation.")
     Component(conductor, "Conductor", "conductor/SKILL.md", "Wave-based worker spawner.\nOrders workers by dependency graph.\nCollects synthesis block. Detects resets.")
     Component(implement, "Implement", "implement/SKILL.md", "Coder, tester, reviewer workers.\nWrite code + tests. Must pass tests.\nSurface new requirements as [new-req].")
+    Component(sec_review, "Security Review", "security-review/SKILL.md", "STRIDE threat model at design time.\nOWASP code review after arch-review.\nOperator gate per finding. Opus.")
     Component(arch_review, "Arch-Review", "arch-review/SKILL.md", "REQ coverage check. C4 boundary\nvalidation. ADR compliance. Test\nquality sensors. Approval gate.")
 }
 
@@ -23,6 +24,9 @@ Rel(orch, docs_skill, "invoke docs phase", "")
 Rel(orch, plan_skill, "invoke plan phase", "")
 Rel(orch, conductor, "invoke implement phase\nwith [exec] block", "")
 Rel(orch, arch_review, "invoke arch-review phase", "")
+Rel(orch, sec_review, "invoke security-design\nand security-review phases", "")
+Rel(sec_review, docs_site, "write threat model +\naccepted risks (RST)", "file I/O")
+Rel(sec_review, beads_db, "[security] result on epic;\nfix issues", "bd CLI")
 Rel(orch, beads_db, "create epic, track phase label", "bd CLI")
 Rel(docs_skill, docs_site, "write RST, build HTML", "file I/O + make html")
 Rel(docs_skill, gh_bridge, "receives GitHub context\nas interview brief", "")

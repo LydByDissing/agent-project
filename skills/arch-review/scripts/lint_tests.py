@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-# [origin ref=llm-dsl-5ygq req=REQ-OPERATOR-EDU-011 c4=sdd_skills/arch_review]
+# [origin ref=llm-dsl-5ygq,llm-dsl-2zv1 req=REQ-OPERATOR-EDU-011 c4=sdd_skills/arch_review]
 #   [intent]Static test-quality sensor for Python (AST) and TypeScript/JavaScript (Vitest/Jest, brace-matching scanner) test files, reporting crit/major/info findings with exit codes for arch-review.[/intent]
 # [/origin]
 """Static quality sensor for test files.
 
 Detects poor-quality tests that are likely to mislead rather than protect:
-- Tests with no assertions (always pass, prove nothing)
+- Tests with no assertions (always pass, prove nothing). Counted as assertions: assert, pytest.raises/warns/fail,
+  assert*/expect* calls, self.assert*, and calls to same-module (or sibling-module imported) helpers that assert
 - Trivially true assertions (assert True, assert 1, expect(true), expect(1))
 - Sole assertion is 'assert result is not None' / expect(x).toBeDefined() (proves existence, not behaviour)
 - Generic non-descriptive names (test_1, test_it, test_func, 'works', 'test 1')
@@ -75,6 +76,68 @@ class Finding:
 
 def _asserts(func: ast.FunctionDef) -> list[ast.Assert]:
     return [n for n in ast.walk(func) if isinstance(n, ast.Assert)]
+
+
+PYTEST_ASSERTING = {"raises", "warns", "fail", "approx_fail"}
+
+
+def _call_name(call: ast.Call) -> tuple[str | None, str | None]:
+    """Return (receiver name or None, callee name) for a call node."""
+    f = call.func
+    if isinstance(f, ast.Name):
+        return None, f.id
+    if isinstance(f, ast.Attribute):
+        recv = f.value.id if isinstance(f.value, ast.Name) else None
+        return recv, f.attr
+    return None, None
+
+
+def _module_funcs(tree: ast.AST) -> dict[str, ast.AST]:
+    return {n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _imported_funcs(tree: ast.AST, directory: Path) -> dict[str, ast.AST]:
+    """Functions imported by name from sibling modules (from x import f)."""
+    out: dict[str, ast.AST] = {}
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.ImportFrom) or n.level > 1 or not n.module or "." in n.module:
+            continue
+        mod = directory / f"{n.module}.py"
+        if not mod.is_file():
+            continue
+        try:
+            funcs = _module_funcs(ast.parse(mod.read_text(encoding="utf-8")))
+        except (SyntaxError, OSError):
+            continue
+        for a in n.names:
+            if a.name in funcs:
+                out[a.asname or a.name] = funcs[a.name]
+    return out
+
+
+def _has_assertion(node: ast.AST, funcs: dict[str, ast.AST], seen: set[int] | None = None, stmts: bool = True) -> bool:
+    """True if node asserts directly or via pytest.raises/warns/fail, assert*/expect* calls, self.assert*, or a resolvable helper."""
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return False
+    seen.add(id(node))
+    for n in ast.walk(node):
+        if stmts and isinstance(n, ast.Assert):
+            return True
+        if not isinstance(n, ast.Call):
+            continue
+        recv, name = _call_name(n)
+        if name is None:
+            continue
+        if recv == "pytest" and name in PYTEST_ASSERTING:
+            return True
+        if name.startswith(("assert", "expect")):
+            return True
+        target = funcs.get(name)
+        if target is not None and target is not node and (recv is None or recv in ("self", "cls")):
+            if _has_assertion(target, funcs, seen, stmts):
+                return True
+    return False
 
 
 def _is_trivially_true(node: ast.Assert) -> bool:
@@ -446,6 +509,7 @@ def check_file(path: Path) -> tuple[list[Finding], bool]:
 
     findings: list[Finding] = []
     rel = str(path)
+    funcs = {**_imported_funcs(tree, path.resolve().parent), **_module_funcs(tree)}
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
@@ -460,7 +524,7 @@ def check_file(path: Path) -> tuple[list[Finding], bool]:
 
         asserts = _asserts(node)
 
-        if not asserts:
+        if not asserts and not _has_assertion(node, funcs):
             findings.append(Finding(CRIT, rel, node.lineno, name, "no assertions — test always passes, proves nothing"))
             continue
 
@@ -468,7 +532,7 @@ def check_file(path: Path) -> tuple[list[Finding], bool]:
         if trivial:
             findings.append(Finding(CRIT, rel, trivial[0].lineno, name, "trivially true assertion (assert True / assert 1)"))
 
-        if _is_not_none_only(asserts):
+        if _is_not_none_only(asserts) and not _has_assertion(node, funcs, stmts=False):
             findings.append(Finding(MAJOR, rel, node.lineno, name, "sole assertion is 'assert result is not None' — verifies existence, not behaviour"))
 
         if _is_generic(name):

@@ -289,13 +289,13 @@ Present the summary, then:
 <summary as above>
 
 **Options**:
-- **approve** — accept findings as-is, close the SDD run
+- **approve** — accept findings as-is; sdd advances to security-review
 - **fix [finding]** — I will address the listed findings and re-run the review
 - **revise docs [what]** — finding implies a missing or wrong requirement;
   sdd will reset to the docs phase
 ```
 
-**Do not close the epic until the user explicitly approves.**
+**Do not advance until the user explicitly approves. Never close the epic.**
 
 ### On "fix": re-run review
 
@@ -304,33 +304,26 @@ re-run steps 2–5 for the affected findings. Re-present the summary.
 
 ### On "revise docs": signal reset
 
-Write a reset signal to the epic:
+Do not touch the epic's `phase=` label (sdd owns phase changes). Record the
+finding on the epic and return the reset signal:
 
 ```bash
-bd label add $EPIC_ID "phase=reset" \
-  --body "arch-review: reset triggered. Finding: <description>"
+bd update $EPIC_ID --append-notes "arch-review: reset triggered. Finding: <description>"
 ```
 
 Return to sdd, which bounces to docs phase and increments reset counter.
 
 ---
 
-## Closing the Run
+## Approval
 
-After user approval with no outstanding major/critical findings:
-
-```bash
-# Close the epic
-bd close $EPIC_ID
-
-# Update all feature requirements to status=implemented
-# (update the RST files in docs/source/specs/features/)
-```
+After user approval with no outstanding major/critical findings, do NOT close
+the epic and do NOT mark requirements implemented: the security-review phase
+still follows. Return the approval to sdd, which advances to security-review.
 
 Report to sdd:
 
 ```
 [arch-review run=<RUN_ID> feat=<FEAT_ID> s=approved]
-[req id=REQ-XXX-NNN s=implemented]
 [/arch-review]
 ```

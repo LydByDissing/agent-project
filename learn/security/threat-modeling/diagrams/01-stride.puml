@@ -1,0 +1,19 @@
+@startuml 01-stride
+left to right direction
+
+rectangle "Operator workstation\n(trust boundary 1: local user)" as WS {
+  actor "Operator" as OP
+  rectangle "CLI agent" as AG
+  rectangle "Local tools\n(shell, git, bd)" as TL
+}
+
+rectangle "Untrusted repository content\n(trust boundary 2: issue, PR and doc text)" as REPO #FFE5E5
+cloud "External LLM API\n(trust boundary 3)" as API
+cloud "GitHub\n(trust boundary 4)" as GH
+
+OP --> AG : instructions (trusted)
+AG --> TL : run commands
+REPO --> AG : read as data only
+AG --> API : prompts and context
+AG --> GH : issue and PR calls
+@enduml

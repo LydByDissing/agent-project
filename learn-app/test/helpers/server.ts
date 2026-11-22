@@ -1,4 +1,4 @@
-// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
+// [origin ref=llm-dsl-p4o5,llm-dsl-gu1y.17,llm-dsl-2zv1.18 req=REQ-OPERATOR-EDU-011 c4=learn_app/learn_server]
 //   [intent]Shared helpers to copy the seed learn/ tree (with fresh mtimes, as a git clone would produce) and to spawn the bundled server.js on a free port with a private home, always killed by PID when the test file ends.[/intent]
 // [/origin]
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -51,9 +51,18 @@ export function addTlsTopic(project: string): void {
   );
 }
 
-/** Copies the repo seed learn/ into `project` with fresh mtimes; validation must not depend on them. */
-export function copyLearn(project: string, opts: { tls?: boolean } = {}): void {
-  cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true });
+/**
+ * Copies the repo seed learn/ into `project` with fresh mtimes; validation must not depend on them.
+ * `domains` limits the copy to the named domain directories (e.g. ['backend']) so a test sees a fixed tree
+ * even when the seed gains domains; omit it to copy the whole seed.
+ */
+export function copyLearn(project: string, opts: { tls?: boolean; domains?: string[] } = {}): void {
+  if (opts.domains) {
+    mkdirSync(join(project, 'learn'), { recursive: true });
+    for (const domain of opts.domains) cpSync(join(REPO, 'learn', domain), join(project, 'learn', domain), { recursive: true });
+  } else {
+    cpSync(join(REPO, 'learn'), join(project, 'learn'), { recursive: true });
+  }
   if (opts.tls) addTlsTopic(project);
 }
 
@@ -63,10 +72,10 @@ export interface TmpProject {
 }
 
 /** A fresh project (seed learn/ copied, optional .sdd/now.json) and a private learner home. */
-export function makeProject(opts: { tls?: boolean; now?: unknown; learner?: object | null } = {}): TmpProject {
+export function makeProject(opts: { tls?: boolean; now?: unknown; learner?: object | null; domains?: string[] } = {}): TmpProject {
   const project = tmp('learn-proj-');
   const home = tmp('learn-home-');
-  copyLearn(project, { tls: opts.tls });
+  copyLearn(project, { tls: opts.tls, domains: opts.domains });
   if (opts.now !== undefined) {
     mkdirSync(join(project, '.sdd'));
     writeFileSync(join(project, '.sdd', 'now.json'), JSON.stringify(opts.now));

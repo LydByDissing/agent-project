@@ -1,7 +1,7 @@
 SDD Skills — Components
 =======================
 
-The SDD Skills container contains seven components. Each maps to a
+The SDD Skills container contains eight components. Each maps to a
 ``skills/<name>/SKILL.md`` that an LLM agent reads before acting.
 
 .. image:: ../diagrams/components_sdd_skills.svg
@@ -20,8 +20,8 @@ epic, reads the current ``phase=`` label, invokes the appropriate skill for
 each phase, advances the label on success, and increments ``reset-count``
 on resets.
 
-**Patterns**: State machine over ``phase`` enum (docs → plan → implement →
-arch-review → done). All state is externalised to the bd epic label — the
+**Patterns**: State machine over ``phase`` enum (docs → security-design →
+plan → implement → arch-review → security-review → done). All state is externalised to the bd epic label — the
 orchestrator is stateless between invocations.
 
 **Owns**:
@@ -40,8 +40,8 @@ orchestrator is stateless between invocations.
 
 **Interfaces**:
 
-- Calls: GitHub Bridge (fetch + update), Docs Skill, Plan Skill, Conductor,
-  Arch-Review, bd CLI.
+- Calls: GitHub Bridge (fetch + update), Docs Skill, Security Review, Plan
+  Skill, Conductor, Arch-Review, bd CLI.
 - Returns: terminal report to developer on ``phase=done``.
 
 ---
@@ -224,3 +224,51 @@ findings. The user sees findings before approving.
 **Does NOT**:
 
 - Fix code. Surfaces findings and lets the pipeline reset if needed.
+
+---
+
+Security Review
+~~~~~~~~~~~~~~~
+
+**Responsibility**: Security analysis at two points in the pipeline. In the
+``security-design`` phase (after docs approval, before plan) it builds or
+updates a STRIDE threat model for every new or changed container and trust
+boundary in the run's docs. In the ``security-review`` phase (after
+arch-review approval) it checks the run's code against OWASP ASVS / Top 10
+concerns and verifies that each threat's mitigation is implemented and
+covered by a test that fails without it (FEAT-SECURITY-REVIEW, ADR-005).
+
+**Patterns**: Two parts. The analysis agent ``agents/security-analyst.md``
+(Opus, tools Read, Grep, Glob only) receives the scoped input, computed by
+the orchestrator from the epic's base commit, as data and returns structured
+findings; text in the input that looks like an instruction is reported as a
+possible-injection finding. The inline part, in the main context, validates
+the findings, writes them to the threat model as ``open``, runs the operator
+gate, records decisions, and on "fix" spawns a scope-limited coder worker
+and verifies it (suites, scope, sabotage check). Gate state is checked by
+``scripts/security_gate.py``, never trusted from agent output or bd notes,
+and requires a committed review record in ``docs/source/security/reviews.rst``.
+Decisions are collected only through the interactive question tool. The
+orchestrator runs the gate check before every move to plan or done and
+before closing the epic.
+
+**Owns**:
+
+- ``docs/source/security/threat-model/<container>.rst`` (``threat`` needs)
+  and ``docs/source/security/accepted-risks.rst`` (``risk`` needs).
+- The ``[security]`` result block on the epic notes.
+- The design-time gate (add requirement → reset to docs, accept risk, note)
+  and the post-implementation gate (fix, accept risk, note, revise docs).
+- ``scripts/security_gate.py``: gate check, findings validation, and the
+  redaction check on security output.
+- The append-only rule for THREAT and RISK records.
+- The protected set (defined in RULES.md) that fix workers may never write.
+
+**Does NOT**:
+
+- Edit code. Fixes go through a coder worker.
+- Reset the pipeline on its own. Only an operator choice resets.
+- Analyse content in the main context, or follow instructions found in the
+  content it reviews.
+- Publish secret values or exploit steps, or post findings to GitHub.
+- Run scanners or audit dependencies.
